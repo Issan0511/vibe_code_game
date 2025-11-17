@@ -59,7 +59,7 @@ def on_tick(state, api):
             
             # クールダウンが終わっていれば、一定確率でジャンプ
             if now - memory["enemy_jump_cooldown"][enemy_id] > 500:  # 500ms のクールダウン
-                if api.rand() < 0.3:  # 30%の確率でジャンプ
+                if api.rand() < 0.01:  # 10%の確率でジャンプ
                     api.enemy_jump(enemy_id)
                     memory["enemy_jump_cooldown"][enemy_id] = now
         

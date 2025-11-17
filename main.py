@@ -5,6 +5,8 @@ import random
 import importlib
 import script_user
 from api import GameAPI
+from player import Player
+from enemy import Enemy
 
 # =========================
 # 設定の読み込み
@@ -38,22 +40,8 @@ font = pygame.font.SysFont(None, 24)
 # =========================
 # プレイヤー
 # =========================
-player_width, player_height = config['player']['width'], config['player']['height']
-player_y = GROUND_Y - player_height
-player_vy = 0  # y方向の速度
-player_color = tuple(config['player']['color'])
-
-# 靴の設定
-shoe_width, shoe_height = config['player']['shoe']['width'], config['player']['shoe']['height']
-shoe_color = tuple(config['player']['shoe']['color'])
-
-# ジャンプ関連の定数
 GRAVITY = config['physics']['gravity']
-JUMP_STRENGTH = -10  # configより小さく調整（元は-15）
-is_jumping = False
-jump_held = False  # ジャンプキーが押され続けているか
-jump_time = 0  # ジャンプキーを押している時間
-MAX_JUMP_TIME = 15  # 最大ジャンプ持続時間（フレーム数）
+player = Player(PLAYER_X, GROUND_Y, config)
 
 # ゲーム状態
 game_over = False
@@ -66,104 +54,6 @@ game_clear = False
 BG_WIDTH = config['background']['tile_width']
 camera_x = 0.0           # カメラのx位置（世界座標）
 camera_vx = 0.0          # カメラの速度（慣性用）
-
-# =========================
-# 敵クラス（左右に動く）
-# =========================
-class Enemy:
-    _next_id = 0
-
-    def __init__(self, world_x, y, move_range=100, speed=2, width=40, height=40, use_gravity=True):
-        """
-        world_x: 世界座標でのx
-        y      : 画面上でのy（地面にいる感じ）
-        move_range: 中心から左右にどれくらい動くか
-        speed  : 左右の移動速度
-        use_gravity: 重力を適用するかどうか
-        """
-        self.id = Enemy._next_id
-        Enemy._next_id += 1
-        self.center_x = world_x
-        self.world_x = world_x
-        self.y = y
-        self.move_range = move_range
-        self.speed = speed
-        self.width = width
-        self.height = height
-        self.direction = 1  # 1:右へ, -1:左へ
-        self.color = (255, 80, 80)
-        self.use_gravity = use_gravity
-        self.vx = 0  # x方向の速度（API制御用）
-        self.vy = 0  # y方向の速度
-        self.use_api_control = False  # APIからの制御を使うかどうか
-
-    def move_patrol(self):
-        """左右に往復運動"""
-        self.world_x += self.speed * self.direction
-        if self.world_x > self.center_x + self.move_range:
-            self.world_x = self.center_x + self.move_range
-            self.direction *= -1
-        elif self.world_x < self.center_x - self.move_range:
-            self.world_x = self.center_x - self.move_range
-            self.direction *= -1
-
-    def update(self, platforms, ground_y, gravity):
-        # 移動処理
-        if self.use_api_control:
-            # APIから速度が設定されている場合
-            self.world_x += self.vx
-            # API制御の場合もY方向の速度は重力で制御される
-            # （vyがAPIで設定されても重力が上書きする）
-        else:
-            # 通常の往復運動
-            self.move_patrol()
-        
-        # 重力を適用
-        if self.use_gravity:
-            self.vy += gravity
-            self.y += self.vy
-            
-            # 地面判定
-            if self.y >= ground_y:
-                self.y = ground_y
-                self.vy = 0
-            
-            # 段差との判定
-            enemy_rect_world = pygame.Rect(
-                self.world_x - self.width // 2,
-                self.y - self.height,
-                self.width,
-                self.height
-            )
-            
-            for platform in platforms:
-                platform_rect_world = pygame.Rect(
-                    platform.world_x,
-                    platform.y,
-                    platform.width,
-                    platform.height
-                )
-                
-                if enemy_rect_world.colliderect(platform_rect_world):
-                    # 上から乗った場合
-                    if self.vy > 0 and enemy_rect_world.bottom <= platform_rect_world.top + 10:
-                        self.y = platform_rect_world.top
-                        self.vy = 0
-
-    def draw(self, surface, camera_x):
-        # world_x を camera_x でずらして画面上の位置に変換
-        screen_x = int(self.world_x - camera_x)
-        rect = pygame.Rect(screen_x - self.width // 2,
-                           self.y - self.height,  # yは足元位置として使う
-                           self.width, self.height)
-        pygame.draw.rect(surface, self.color, rect)
-
-    def get_rect(self, camera_x):
-        """当たり判定用の矩形を返す"""
-        screen_x = int(self.world_x - camera_x)
-        return pygame.Rect(screen_x - self.width // 2,
-                          self.y - self.height,
-                          self.width, self.height)
 
 # =========================
 # 段差クラス
@@ -255,11 +145,11 @@ api = GameAPI(state_ref)
 def make_state():
     return {
         "player": {
-            "x": camera_x + PLAYER_X,  # 世界座標
-            "screen_x": PLAYER_X,  # 画面座標
-            "y": player_y,
-            "vy": player_vy,
-            "on_ground": False,  # 必要なら判定結果を入れる
+            "x": camera_x + player.x_screen,  # 世界座標
+            "screen_x": player.x_screen,  # 画面座標
+            "y": player.y,
+            "vy": player.vy,
+            "on_ground": not player.is_jumping,
         },
         "world": {
             "time_ms": pygame.time.get_ticks(),
@@ -296,15 +186,12 @@ while running:
             running = False
         # スペースキーでジャンプ開始
         if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE and not is_jumping:
-                player_vy = JUMP_STRENGTH
-                is_jumping = True
-                jump_held = True
-                jump_time = 0
+            if event.key == pygame.K_SPACE:
+                player.start_jump()
         # スペースキーを離したらジャンプ持続終了
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_SPACE:
-                jump_held = False
+                player.release_jump()
 
     # =========================
     # 入力処理
@@ -341,38 +228,16 @@ while running:
         # =========================
         # プレイヤーの物理演算（ジャンプ）
         # =========================
-        # ジャンプキーが押され続けている場合、上昇力を追加
-        if jump_held and is_jumping and jump_time < MAX_JUMP_TIME and player_vy < 0:
-            player_vy += GRAVITY * 0.3  # 重力を軽減して上昇を持続
-            jump_time += 1
-        else:
-            player_vy += GRAVITY
-        
-        player_y += player_vy
-
-        # 地面判定
-        on_ground = False
-        if player_y >= GROUND_Y - player_height:
-            player_y = GROUND_Y - player_height
-            player_vy = 0
-            is_jumping = False
-            jump_held = False
-            jump_time = 0
-            on_ground = True
+        player.update()
 
         # 段差との判定
-        player_rect = pygame.Rect(PLAYER_X - player_width // 2, player_y, player_width, player_height)
+        player_rect = player.get_rect()
         for platform in platforms:
             platform_rect = platform.get_rect(camera_x)
             if player_rect.colliderect(platform_rect):
                 # 上から乗った場合
-                if player_vy > 0 and player_rect.bottom <= platform_rect.top + 10:
-                    player_y = platform_rect.top - player_height
-                    player_vy = 0
-                    is_jumping = False
-                    jump_held = False
-                    jump_time = 0
-                    on_ground = True
+                if player.vy > 0 and player_rect.bottom <= platform_rect.top + 10:
+                    player.land_on(platform_rect.top)
 
         # =========================
         # 更新処理
@@ -391,13 +256,7 @@ while running:
         # =========================
         # 当たり判定
         # =========================
-        # 靴の当たり判定矩形を作成（プレイヤーの下部）
-        shoe_rect = pygame.Rect(
-            PLAYER_X - shoe_width // 2,
-            player_y + player_height - shoe_height,
-            shoe_width,
-            shoe_height
-        )
+        shoe_rect = player.get_shoe_rect()
         
         # 敵との衝突判定
         enemies_to_remove = []
@@ -405,7 +264,7 @@ while running:
         for enemy in enemies:
             enemy_rect = enemy.get_rect(camera_x)
             # 靴との当たり判定（敵が死ぬ）
-            if shoe_rect.colliderect(enemy_rect) and player_vy > 0:
+            if shoe_rect.colliderect(enemy_rect) and player.vy > 0:
                 enemies_to_remove.append(enemy)
                 enemy_bounced = True  # 敵を踏んだ
             # プレイヤー本体との当たり判定（ゲームオーバー）
@@ -419,18 +278,7 @@ while running:
         # 敵を踏んだ場合のジャンプ処理
         if enemy_bounced:
             keys = pygame.key.get_pressed()
-            if keys[pygame.K_SPACE]:
-                # ジャンプキーあり → 大ジャンプ（通常より高い）
-                player_vy = JUMP_STRENGTH * 1.3  # 通常の1.3倍の力
-                is_jumping = True
-                jump_held = True
-                jump_time = 0
-            else:
-                # ジャンプキーなし → 小ジャンプ
-                player_vy = JUMP_STRENGTH * 0.4  # 通常の40%の力
-                is_jumping = True
-                jump_held = False
-                jump_time = 0
+            player.stomp_enemy(keys[pygame.K_SPACE])
 
         # ゴール判定
         goal_rect = goal.get_rect(camera_x)
@@ -445,11 +293,7 @@ while running:
             game_clear = False
             camera_x = 0.0
             camera_vx = 0.0
-            player_y = GROUND_Y - player_height
-            player_vy = 0
-            is_jumping = False
-            jump_held = False
-            jump_time = 0
+            player.reset()
             # 敵をリセット
             enemies.clear()
             enemies.extend([
@@ -506,22 +350,7 @@ while running:
         )
 
     # プレイヤー（画面上で位置固定）
-    player_rect = pygame.Rect(
-        PLAYER_X - player_width // 2,
-        player_y,
-        player_width,
-        player_height,
-    )
-    pygame.draw.rect(screen, player_color, player_rect)
-    
-    # 靴を描画（プレイヤーの下部）
-    shoe_rect = pygame.Rect(
-        PLAYER_X - shoe_width // 2,
-        player_y + player_height - shoe_height,
-        shoe_width,
-        shoe_height
-    )
-    pygame.draw.rect(screen, shoe_color, shoe_rect)
+    player.draw(screen)
 
     # 段差
     for platform in platforms:
