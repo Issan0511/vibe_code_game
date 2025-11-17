@@ -4,6 +4,8 @@ import json
 import random
 import socket
 import subprocess
+import os
+import time
 # import script_user  # TCP版では不要
 # from api import GameAPI  # TCP版では不要
 from player import Player
@@ -298,11 +300,25 @@ custom_conn = CustomConnection()
 custom_conn.start()
 
 # =========================
+# リロードフラグのチェック用
+# =========================
+last_reload_check = 0
+RELOAD_INTERVAL_MS = 500  # 0.5秒に1回で十分
+
+# =========================
 # メインループ
 # =========================
 running = True
 while running:
     dt = clock.tick(FPS)  # ミリ秒
+    
+    # リロードフラグのチェック
+    now = pygame.time.get_ticks()
+    if now - last_reload_check > RELOAD_INTERVAL_MS:
+        last_reload_check = now
+        if os.path.exists("reload.flag"):
+            os.remove("reload.flag")
+            custom_conn.restart()   # custom_runner を再起動 → 新しい script_user.py がimportされる
     # =========================
     # イベント処理
     # =========================
