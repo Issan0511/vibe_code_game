@@ -39,6 +39,14 @@ class Player:
     def release_jump(self):
         self.jump_held = False
 
+    def reset(self):
+        """プレイヤーの状態を初期状態にリセット"""
+        self.y = self.ground_y - self.height
+        self.vy = 0
+        self.is_jumping = False
+        self.jump_held = False
+        self.jump_time = 0
+
     # 物理更新 ---------------------------------
     def update(self):
         # 可変ジャンプ（押し続けている間は重力を軽減）
@@ -49,10 +57,8 @@ class Player:
             self.vy += self.gravity
 
         self.y += self.vy
-
-        # 地面判定
-        if self.y >= self.ground_y - self.height:
-            self.land_on(self.ground_y)
+        
+        # 地面判定は main.py で行う（崖判定のため）
 
     def land_on(self, surface_y):
         """platform や地面の上に着地するときに呼ぶ"""

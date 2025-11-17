@@ -7,6 +7,7 @@ import script_user
 from api import GameAPI
 from player import Player
 from enemy import Enemy
+from level import load_level, is_on_ground
 
 # =========================
 # 設定の読み込み
@@ -37,6 +38,16 @@ clock = pygame.time.Clock()
 
 font = pygame.font.SysFont(None, 24)
 
+# 背景画像の読み込み
+try:
+    bg_image = pygame.image.load('background.png').convert()
+    bg_width = bg_image.get_width()
+    bg_height = bg_image.get_height()
+except:
+    bg_image = None
+    bg_width = SCREEN_WIDTH
+    bg_height = SCREEN_HEIGHT
+
 # =========================
 # プレイヤー
 # =========================
@@ -56,50 +67,6 @@ camera_x = 0.0           # カメラのx位置（世界座標）
 camera_vx = 0.0          # カメラの速度（慣性用）
 
 # =========================
-# 段差クラス
-# =========================
-class Platform:
-    def __init__(self, world_x, y, width, height):
-        self.world_x = world_x
-        self.y = y
-        self.width = width
-        self.height = height
-        self.color = (139, 69, 19)
-
-    def draw(self, surface, camera_x):
-        screen_x = int(self.world_x - camera_x)
-        rect = pygame.Rect(screen_x, self.y, self.width, self.height)
-        pygame.draw.rect(surface, self.color, rect)
-
-    def get_rect(self, camera_x):
-        screen_x = int(self.world_x - camera_x)
-        return pygame.Rect(screen_x, self.y, self.width, self.height)
-
-# =========================
-# ゴールクラス
-# =========================
-class Goal:
-    def __init__(self, world_x, y, width=60, height=80, color=None):
-        self.world_x = world_x
-        self.y = y
-        self.width = width
-        self.height = height
-        self.color = color if color else (255, 215, 0)
-
-    def draw(self, surface, camera_x):
-        screen_x = int(self.world_x - camera_x)
-        rect = pygame.Rect(screen_x, self.y - self.height, self.width, self.height)
-        pygame.draw.rect(surface, self.color, rect)
-        # 旗のポール
-        pygame.draw.line(surface, (100, 100, 100), 
-                        (screen_x + 10, self.y - self.height),
-                        (screen_x + 10, self.y), 3)
-
-    def get_rect(self, camera_x):
-        screen_x = int(self.world_x - camera_x)
-        return pygame.Rect(screen_x, self.y - self.height, self.width, self.height)
-
-# =========================
 # 敵を複数配置
 # =========================
 enemies = [
@@ -111,20 +78,9 @@ enemies = [
 ]
 
 # =========================
-# 段差を配置
+# レベル（足場・地面・ゴール）をロード
 # =========================
-platforms = [
-    Platform(world_x=p['world_x'], y=GROUND_Y - p['y_offset'],
-             width=p['width'], height=p['height'])
-    for p in config['platforms']
-]
-
-# =========================
-# ゴール
-# =========================
-goal = Goal(world_x=config['goal']['world_x'], y=GROUND_Y,
-            width=config['goal']['width'], height=config['goal']['height'],
-            color=tuple(config['goal']['color']))
+platforms, ground_segments, goal = load_level(config, GROUND_Y)
 
 # =========================
 # ゲーム状態とAPI
@@ -135,7 +91,9 @@ state_ref = {
     "GROUND_Y": GROUND_Y,
     "config": config,
     "enemies": enemies,
+    "platforms": platforms,
     "bg_color": tuple(config['background']['color']),
+    "goal": goal,
 }
 api = GameAPI(state_ref)
 
@@ -188,6 +146,30 @@ while running:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_SPACE:
                 player.start_jump()
+            # R キーでリセット
+            if event.key == pygame.K_r:
+                # プレイヤーの位置をリセット
+                player.reset()
+                camera_x = 0.0
+                camera_vx = 0.0
+                
+                # ゴールをリセット
+                goal.reset_position()
+                
+                # 足場をリセット
+                for platform in platforms:
+                    platform.reset_position()
+                
+                # script_user のメモリをリセット
+                try:
+                    if hasattr(script_user, 'on_init'):
+                        state_dict = make_state()
+                        script_user.on_init(state_dict, api)
+                        # メモリもリセット
+                        if hasattr(script_user, 'memory'):
+                            script_user.memory["goal_approached"] = False
+                except Exception as e:
+                    print("script_user.on_init error:", e)
         # スペースキーを離したらジャンプ持続終了
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_SPACE:
@@ -226,18 +208,43 @@ while running:
         camera_x += camera_vx
 
         # =========================
+        # 足場の更新
+        # =========================
+        platform_moves = {}  # 各足場の移動量を記録
+        for i, platform in enumerate(platforms):
+            dy = platform.update()
+            platform_moves[i] = dy
+
+        # =========================
         # プレイヤーの物理演算（ジャンプ）
         # =========================
         player.update()
 
         # 段差との判定
         player_rect = player.get_rect()
-        for platform in platforms:
+        player_on_platform = None  # プレイヤーが乗っている足場
+        
+        for i, platform in enumerate(platforms):
             platform_rect = platform.get_rect(camera_x)
             if player_rect.colliderect(platform_rect):
                 # 上から乗った場合
                 if player.vy > 0 and player_rect.bottom <= platform_rect.top + 10:
                     player.land_on(platform_rect.top)
+                    player_on_platform = i
+        
+        # 地面判定（崖でない場所のみ）
+        player_world_x = camera_x + player.x_screen
+        if player.y >= GROUND_Y - player.height and player.vy > 0:
+            if is_on_ground(ground_segments, player_world_x):
+                # 地面がある場所に着地
+                player.land_on(GROUND_Y)
+            # 地面がない場所（崖）では着地しない
+                    
+        # プレイヤーが足場に乗っている場合、足場の移動に追従
+        if player_on_platform is not None:
+            dy = platform_moves[player_on_platform]
+            if dy != 0:
+                player.y += dy  # 足場の上下移動に追従
 
         # =========================
         # 更新処理
@@ -251,7 +258,10 @@ while running:
             print("script_user error:", e)
 
         for enemy in enemies:
-            enemy.update(platforms, GROUND_Y, GRAVITY)
+            enemy.update(platforms, GROUND_Y, GRAVITY, lambda x: is_on_ground(ground_segments, x))
+
+        # 画面外に落ちた敵を削除
+        enemies[:] = [e for e in enemies if e.y < SCREEN_HEIGHT + 100]
 
         # =========================
         # 当たり判定
@@ -284,6 +294,11 @@ while running:
         goal_rect = goal.get_rect(camera_x)
         if player_rect.colliderect(goal_rect):
             game_clear = True
+
+        # 崖判定（プレイヤーが地面の範囲外で、足場にも乗っていない場合）
+        player_world_x = camera_x + player.x_screen
+        if player.y >= GROUND_Y and not is_on_ground(ground_segments, player_world_x) and player_on_platform is None:
+            game_over = True
     else:
         # ゲーム終了後、Rキーでリスタート
         keys = pygame.key.get_pressed()
@@ -316,38 +331,37 @@ while running:
     # =========================
     # 描画
     # =========================
-    # 背景
-    screen.fill(state_ref["bg_color"])
+    # 背景画像のスクロール描画
+    if bg_image:
+        # カメラ位置に応じた背景のオフセットを計算（視差効果のため、少し遅めにスクロール）
+        bg_scroll_x = int(camera_x * 0.5) % bg_width
+        
+        # 画面を埋めるために必要な枚数を計算
+        num_tiles = (SCREEN_WIDTH // bg_width) + 2
+        
+        for i in range(num_tiles):
+            x_pos = i * bg_width - bg_scroll_x
+            # 背景画像を縦に拡大して描画
+            scaled_bg = pygame.transform.scale(bg_image, (bg_width, SCREEN_HEIGHT))
+            screen.blit(scaled_bg, (x_pos, 0))
+    else:
+        # 背景画像が読み込めない場合は単色
+        screen.fill(state_ref["bg_color"])
 
-    # 地面
-    ground_rect = pygame.Rect(0, GROUND_Y, SCREEN_WIDTH, SCREEN_HEIGHT - GROUND_Y)
-    pygame.draw.rect(screen, tuple(config['ground']['color']), ground_rect)
-
-    # 簡単な「山」をタイル風に描画（背景スクロールの雰囲気用）
-    # camera_x に応じて位置をずらす
-    tile_offset = int(camera_x) % BG_WIDTH
-    for i in range(-1, 3):  # 画面外まで少し余分に描画
-        base_x = i * BG_WIDTH - tile_offset
-        # 山1
-        pygame.draw.polygon(
-            screen,
-            (34, 139, 34),
-            [
-                (base_x + 100, GROUND_Y),
-                (base_x + 200, GROUND_Y - 120),
-                (base_x + 300, GROUND_Y),
-            ],
-        )
-        # 山2
-        pygame.draw.polygon(
-            screen,
-            (34, 139, 34),
-            [
-                (base_x + 400, GROUND_Y),
-                (base_x + 520, GROUND_Y - 150),
-                (base_x + 640, GROUND_Y),
-            ],
-        )
+    # 地面（セグメントごとに描画）
+    for segment in ground_segments:
+        # 世界座標をスクリーン座標に変換
+        screen_start_x = int(segment['start_x'] - camera_x)
+        screen_end_x = int(segment['end_x'] - camera_x)
+        
+        # 画面内に描画する部分のみ計算
+        visible_start_x = max(screen_start_x, 0)
+        visible_end_x = min(screen_end_x, SCREEN_WIDTH)
+        
+        if visible_start_x < visible_end_x:
+            ground_width = visible_end_x - visible_start_x
+            ground_rect = pygame.Rect(visible_start_x, GROUND_Y, ground_width, SCREEN_HEIGHT - GROUND_Y)
+            pygame.draw.rect(screen, tuple(config['ground']['color']), ground_rect)
 
     # プレイヤー（画面上で位置固定）
     player.draw(screen)

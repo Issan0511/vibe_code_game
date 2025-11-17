@@ -72,7 +72,7 @@
     },
     {
       "world_x": 900,
-      "y_offset": 80,
+      "y_offset": 150,
       "width": 180,
       "height": 20
     },
@@ -84,9 +84,24 @@
     }
   ],
   "goal": {
-    "world_x": 1600,
+    "world_x": 3000,
+    "world_y": 0,
     "width": 60,
     "height": 80,
     "color": [255, 215, 0]
-  }
+  },
+  "ground_segments": [
+    {
+      "start_x": 0,
+      "end_x": 400
+    },
+    {
+      "start_x": 850,
+      "end_x": 1100
+    },
+    {
+      "start_x": 1400,
+      "end_x": 5000
+    }
+  ]
 }

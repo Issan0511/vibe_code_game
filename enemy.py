@@ -38,7 +38,7 @@ class Enemy:
             self.world_x = self.center_x - self.move_range
             self.direction *= -1
 
-    def update(self, platforms, ground_y, gravity):
+    def update(self, platforms, ground_y, gravity, is_on_ground_func=None):
         # 移動処理
         if self.use_api_control:
             # APIから速度が設定されている場合
@@ -54,10 +54,13 @@ class Enemy:
             self.vy += gravity
             self.y += self.vy
             
-            # 地面判定
-            if self.y >= ground_y:
-                self.y = ground_y
-                self.vy = 0
+            # 地面判定（崖でない場所のみ）
+            if self.y >= ground_y and self.vy > 0:
+                # is_on_ground_func が提供されている場合は崖判定を行う
+                if is_on_ground_func is None or is_on_ground_func(self.world_x):
+                    self.y = ground_y
+                    self.vy = 0
+                # 崖の場合は着地しない（落下し続ける）
             
             # 段差との判定
             enemy_rect_world = pygame.Rect(

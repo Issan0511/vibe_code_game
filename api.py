@@ -133,3 +133,68 @@ class GameAPI:
         
         return current
 
+    # ---- ゴール関連 ----
+    def move_goal(self, dx, dy=0):
+        """
+        ゴールの座標を相対的に変更する
+        例: api.move_goal(100, -50)  # x方向に+100、y方向に-50移動
+        """
+        goal = self.m.get("goal")
+        if goal:
+            goal.world_x += dx
+            goal.y += dy
+
+    def get_goal_pos(self):
+        """
+        ゴールの座標を取得する
+        戻り値: {"x": world_x, "y": y} または None
+        """
+        goal = self.m.get("goal")
+        if goal:
+            return {"x": goal.world_x, "y": goal.y}
+        return None
+
+    def set_goal_pos(self, x, y):
+        """
+        ゴールの座標を絶対的に設定する
+        例: api.set_goal_pos(1600, 520)
+        """
+        goal = self.m.get("goal")
+        if goal:
+            goal.world_x = x
+            goal.y = y
+
+    # ---- 足場関連 ----
+    def set_platform_velocity(self, platform_index, vx, vy):
+        """
+        足場の移動速度を設定する
+        platform_index: 足場のインデックス（0から始まる）
+        vx: x方向の速度（正で右、負で左）
+        vy: y方向の速度（正で下、負で上）
+        例: api.set_platform_velocity(0, 2, 0)  # 最初の足場を右に移動
+        例: api.set_platform_velocity(1, 0, -1) # 2番目の足場を上に移動
+        """
+        platforms = self.m.get("platforms")
+        if platforms and 0 <= platform_index < len(platforms):
+            platforms[platform_index].set_velocity(vx, vy)
+
+    def stop_platform(self, platform_index):
+        """
+        足場の移動を停止する
+        platform_index: 足場のインデックス（0から始まる）
+        """
+        platforms = self.m.get("platforms")
+        if platforms and 0 <= platform_index < len(platforms):
+            platforms[platform_index].stop()
+
+    def get_platform_pos(self, platform_index):
+        """
+        足場の座標を取得する
+        戻り値: {"x": world_x, "y": y} または None
+        """
+        platforms = self.m.get("platforms")
+        if platforms and 0 <= platform_index < len(platforms):
+            platform = platforms[platform_index]
+            return {"x": platform.world_x, "y": platform.y}
+        return None
+
