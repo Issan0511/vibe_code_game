@@ -2,9 +2,10 @@ import pygame
 import sys
 import json
 import random
-import importlib
-import script_user
-from api import GameAPI
+import socket
+import subprocess
+# import script_user  # TCP版では不要
+# from api import GameAPI  # TCP版では不要
 from player import Player
 from enemy import Enemy
 from level import load_level, is_on_ground
@@ -83,21 +84,6 @@ enemies = [
 platforms, ground_segments, goal = load_level(config, GROUND_Y)
 
 # =========================
-# ゲーム状態とAPI
-# =========================
-state_ref = {
-    "GRAVITY": GRAVITY,
-    "MAX_SPEED": MAX_SPEED,
-    "GROUND_Y": GROUND_Y,
-    "config": config,
-    "enemies": enemies,
-    "platforms": platforms,
-    "bg_color": tuple(config['background']['color']),
-    "goal": goal,
-}
-api = GameAPI(state_ref)
-
-# =========================
 # 状態スナップショット関数
 # =========================
 def make_state():
@@ -118,17 +104,198 @@ def make_state():
             {"id": e.id, "x": e.world_x, "y": e.y}
             for e in enemies
         ],
+        "goal": {"x": goal.world_x, "y": goal.y},
+        "platforms": [
+            {"x": p.world_x, "y": p.y}
+            for p in platforms
+        ],
     }
 
 # =========================
-# script_user の初期化関数を呼ぶ
+# TCP接続クラス
 # =========================
-try:
-    if hasattr(script_user, 'on_init'):
-        state_dict = make_state()
-        script_user.on_init(state_dict, api)
-except Exception as e:
-    print("script_user.on_init error:", e)
+class CustomConnection:
+    def __init__(self, host="127.0.0.1", port=50000):
+        self.host = host
+        self.port = port
+        self.server_sock = None
+        self.conn = None
+        self.buf = b""
+        self.proc = None
+
+    def start(self):
+        # サーバソケット
+        self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server_sock.bind((self.host, self.port))
+        self.server_sock.listen(1)
+
+        # custom_runner.py を起動
+        self.proc = subprocess.Popen(
+            [sys.executable, "custom_runner.py"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+
+        print("Waiting for custom_runner...")
+        self.conn, addr = self.server_sock.accept()
+        print("custom_runner connected from", addr)
+        self.conn.setblocking(False)
+
+    def restart(self):
+        if self.proc and self.proc.poll() is None:
+            self.proc.kill()
+        if self.conn:
+            self.conn.close()
+        if self.server_sock:
+            self.server_sock.close()
+        self.conn = None
+        self.server_sock = None
+        self.start()
+
+    def send_state(self, state):
+        if not self.conn:
+            return
+        try:
+            msg = json.dumps({"type": "tick", "state": state}) + "\n"
+            self.conn.sendall(msg.encode("utf-8"))
+        except OSError:
+            print("send failed, restarting custom_runner")
+            self.restart()
+
+    def poll_commands(self):
+        if not self.conn:
+            return
+        try:
+            data = self.conn.recv(4096)
+            if not data:
+                print("custom_runner disconnected, restarting")
+                self.restart()
+                return
+            self.buf += data
+        except BlockingIOError:
+            pass
+
+        while b"\n" in self.buf:
+            line, self.buf = self.buf.split(b"\n", 1)
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line.decode("utf-8"))
+            except json.JSONDecodeError:
+                continue
+            if msg.get("type") == "commands":
+                for c in msg.get("commands", []):
+                    yield c
+
+# =========================
+# コマンド適用関数
+# =========================
+def clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+def apply_command(cmd):
+    global GRAVITY, MAX_SPEED, config
+
+    op = cmd.get("op")
+
+    if op == "set_param":
+        key = cmd.get("key")
+        val = cmd.get("value")
+        if key == "gravity":
+            GRAVITY = clamp(float(val), -5.0, 5.0)
+        elif key == "max_speed":
+            MAX_SPEED = clamp(float(val), 0.5, 30.0)
+
+    elif op == "set_config":
+        key = cmd.get("key", "")
+        val = cmd.get("value")
+        keys = key.split(".")
+        cur = config
+        for k in keys[:-1]:
+            if k not in cur or not isinstance(cur[k], dict):
+                cur[k] = {}
+            cur = cur[k]
+        cur[keys[-1]] = val
+
+    elif op == "spawn_enemy":
+        if len(enemies) >= 300:
+            return
+        x = float(cmd.get("x", camera_x + 800))
+        y = float(cmd.get("y", GROUND_Y))
+        enemies.append(
+            Enemy(world_x=x, y=y, move_range=100, speed=2,
+                  width=40, height=40, use_gravity=True)
+        )
+
+    elif op == "set_enemy_vel":
+        eid = cmd.get("id")
+        vx = float(cmd.get("vx", 0.0))
+        vy = cmd.get("vy", None)
+        MAX_V = 15.0
+        if vy is not None:
+            vy = float(vy)
+            speed2 = vx*vx + vy*vy
+            if speed2 > MAX_V*MAX_V:
+                s = MAX_V / (speed2 ** 0.5)
+                vx *= s
+                vy *= s
+        else:
+            if abs(vx) > MAX_V:
+                vx = MAX_V if vx > 0 else -MAX_V
+
+        for e in enemies:
+            if e.id == eid:
+                e.use_api_control = True
+                e.vx = vx
+                if vy is not None:
+                    e.vy = vy
+                break
+
+    elif op == "enemy_jump":
+        eid = cmd.get("id")
+        jump_strength = -15
+        for e in enemies:
+            if e.id == eid:
+                if e.y >= GROUND_Y:
+                    e.vy = jump_strength
+                break
+
+    elif op == "set_bg_color":
+        col = cmd.get("color", [135, 206, 235])
+        r = clamp(int(col[0]), 0, 255)
+        g = clamp(int(col[1]), 0, 255)
+        b = clamp(int(col[2]), 0, 255)
+        config['background']['color'] = [r, g, b]
+
+    elif op == "move_goal":
+        dx = float(cmd.get("dx", 0.0))
+        dy = float(cmd.get("dy", 0.0))
+        goal.world_x += dx
+        goal.y += dy
+
+    elif op == "set_goal_pos":
+        goal.world_x = float(cmd.get("x", goal.world_x))
+        goal.y = float(cmd.get("y", goal.y))
+
+    elif op == "set_platform_velocity":
+        idx = int(cmd.get("index", -1))
+        vx = float(cmd.get("vx", 0.0))
+        vy = float(cmd.get("vy", 0.0))
+        if 0 <= idx < len(platforms):
+            platforms[idx].set_velocity(vx, vy)
+
+    elif op == "stop_platform":
+        idx = int(cmd.get("index", -1))
+        if 0 <= idx < len(platforms):
+            platforms[idx].stop()
+
+# =========================
+# TCP接続を初期化
+# =========================
+custom_conn = CustomConnection()
+custom_conn.start()
 
 # =========================
 # メインループ
@@ -160,16 +327,8 @@ while running:
                 for platform in platforms:
                     platform.reset_position()
                 
-                # script_user のメモリをリセット
-                try:
-                    if hasattr(script_user, 'on_init'):
-                        state_dict = make_state()
-                        script_user.on_init(state_dict, api)
-                        # メモリもリセット
-                        if hasattr(script_user, 'memory'):
-                            script_user.memory["goal_approached"] = False
-                except Exception as e:
-                    print("script_user.on_init error:", e)
+                # custom_runner を再起動してメモリをリセット
+                custom_conn.restart()
         # スペースキーを離したらジャンプ持続終了
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_SPACE:
@@ -249,13 +408,11 @@ while running:
         # =========================
         # 更新処理
         # =========================
-        # ---- script_user を呼ぶ ----
-        try:
-            state_dict = make_state()
-            script_user.on_tick(state_dict, api)
-        except Exception as e:
-            # スクリプトが壊れてもゲームは落とさない
-            print("script_user error:", e)
+        # ---- script_user（TCP越し）を呼ぶ ----
+        state_dict = make_state()
+        custom_conn.send_state(state_dict)
+        for cmd in custom_conn.poll_commands():
+            apply_command(cmd)
 
         for enemy in enemies:
             enemy.update(platforms, GROUND_Y, GRAVITY, lambda x: is_on_ground(ground_segments, x))
@@ -318,15 +475,14 @@ while running:
                       use_gravity=e.get('use_gravity', True))
                 for e in config['enemies']
             ])
-            # スクリプトを再読み込み
-            importlib.reload(script_user)
-            # 初期化関数を再実行
-            try:
-                if hasattr(script_user, 'on_init'):
-                    state_dict = make_state()
-                    script_user.on_init(state_dict, api)
-            except Exception as e:
-                print("script_user.on_init error:", e)
+            
+            # ゴールと足場をリセット
+            goal.reset_position()
+            for platform in platforms:
+                platform.reset_position()
+            
+            # custom_runner を再起動
+            custom_conn.restart()
 
     # =========================
     # 描画
@@ -346,7 +502,7 @@ while running:
             screen.blit(scaled_bg, (x_pos, 0))
     else:
         # 背景画像が読み込めない場合は単色
-        screen.fill(state_ref["bg_color"])
+        screen.fill(tuple(config['background']['color']))
 
     # 地面（セグメントごとに描画）
     for segment in ground_segments:

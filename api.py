@@ -198,3 +198,141 @@ class GameAPI:
             return {"x": platform.world_x, "y": platform.y}
         return None
 
+    # ---- 便利機能 ----
+    def spawn_enemy_periodically(self, state, memory, interval_ms=1000, spawn_chance=0.5, offset_x=400):
+        """
+        定期的にプレイヤーの先に敵を出現させる
+        
+        引数:
+            state: ゲーム状態
+            memory: メモリdict（"last_spawn_time"キーを使用）
+            interval_ms: 出現間隔（ミリ秒）
+            spawn_chance: 出現確率（0.0〜1.0）
+            offset_x: プレイヤーからのx方向のオフセット
+        """
+        if "last_spawn_time" not in memory:
+            memory["last_spawn_time"] = 0
+        
+        now = state["world"]["time_ms"]
+        px = state["player"]["x"]
+        py = state["player"]["y"]
+        
+        if now - memory["last_spawn_time"] > interval_ms:
+            memory["last_spawn_time"] = now
+            if self.rand() < spawn_chance:
+                self.spawn_enemy(x=px + offset_x, y=py)
+
+    def enemy_chase_and_jump(self, state, memory, chase_distance=150, jump_chance=0.01, jump_cooldown_ms=500):
+        """
+        全敵をプレイヤー追尾させ、近い場合はランダムでジャンプ
+        
+        引数:
+            state: ゲーム状態
+            memory: メモリdict（"enemy_jump_cooldown"キーを使用）
+            chase_distance: ジャンプ判定する距離
+            jump_chance: ジャンプ確率（0.0〜1.0）
+            jump_cooldown_ms: ジャンプのクールダウン（ミリ秒）
+        """
+        if "enemy_jump_cooldown" not in memory:
+            memory["enemy_jump_cooldown"] = {}
+        
+        now = state["world"]["time_ms"]
+        px = state["player"]["x"]
+        
+        for enemy in state["enemies"]:
+            enemy_id = enemy["id"]
+            dx = px - enemy["x"]
+            
+            # 敵が近い場合はジャンプの判定
+            if abs(dx) < chase_distance:
+                # クールダウン管理
+                if enemy_id not in memory["enemy_jump_cooldown"]:
+                    memory["enemy_jump_cooldown"][enemy_id] = 0
+                
+                # クールダウンが終わっていれば、一定確率でジャンプ
+                if now - memory["enemy_jump_cooldown"][enemy_id] > jump_cooldown_ms:
+                    if self.rand() < jump_chance:
+                        self.enemy_jump(enemy_id)
+                        memory["enemy_jump_cooldown"][enemy_id] = now
+
+    def goal_move_on_approach(self, state, memory, approach_distance=50, move_dy=-200, spawn_enemy_at_goal=True):
+        """
+        ゴールに接近したらゴールを移動し、元の位置に敵を出現させる（1回のみ）
+        
+        引数:
+            state: ゲーム状態
+            memory: メモリdict（"goal_approached"キーを使用）
+            approach_distance: 接近と判定する距離
+            move_dy: ゴールを移動させるy方向の距離
+            spawn_enemy_at_goal: ゴールの元の位置に敵を出現させるか
+        """
+        if "goal_approached" not in memory:
+            memory["goal_approached"] = False
+        
+        px = state["player"]["x"]
+        goal_pos = self.get_goal_pos()
+        
+        if goal_pos:
+            goal_dist = abs(px - goal_pos["x"])
+            
+            if goal_dist < approach_distance and not memory["goal_approached"]:
+                memory["goal_approached"] = True
+                if spawn_enemy_at_goal:
+                    self.spawn_enemy(x=goal_pos["x"], y=goal_pos["y"])
+                self.move_goal(0, move_dy)
+
+    def platform_oscillate(self, memory, platform_indices=[0, 1], speeds=[(0, -1), (0, 1)], move_range=80):
+        """
+        足場を往復運動させる（上下・左右・斜め対応）
+        
+        引数:
+            memory: メモリdict（"platform_initial_pos"、"platform_speeds"、"platform_range"キーを使用）
+            platform_indices: 制御する足場のインデックスリスト
+            speeds: 各足場の初期速度タプルのリスト [(vx1, vy1), (vx2, vy2), ...]
+                   vx: 正で右、負で左 / vy: 正で下、負で上
+            move_range: 移動範囲（ピクセル）
+        """
+        if "platform_initial_pos" not in memory:
+            memory["platform_initial_pos"] = {}
+        if "platform_speeds" not in memory:
+            memory["platform_speeds"] = {}
+        if "platform_range" not in memory:
+            memory["platform_range"] = move_range
+        
+        for idx, platform_index in enumerate(platform_indices):
+            pos = self.get_platform_pos(platform_index)
+            if pos:
+                # 初期座標と速度を記録（初回のみ）
+                if platform_index not in memory["platform_initial_pos"]:
+                    memory["platform_initial_pos"][platform_index] = {"x": pos["x"], "y": pos["y"]}
+                    # 初回に速度を設定
+                    if idx < len(speeds):
+                        vx, vy = speeds[idx]
+                        memory["platform_speeds"][platform_index] = {"vx": vx, "vy": vy}
+                        self.set_platform_velocity(platform_index, vx, vy)
+                
+                initial_pos = memory["platform_initial_pos"][platform_index]
+                current_speed = memory["platform_speeds"][platform_index]
+                platform_range = memory["platform_range"]
+                
+                # 移動範囲を超えたら方向転換
+                new_vx = current_speed["vx"]
+                new_vy = current_speed["vy"]
+                
+                # Y方向のチェック
+                if pos["y"] < initial_pos["y"] - platform_range and current_speed["vy"] < 0:
+                    new_vy = -current_speed["vy"]  # 下に反転
+                elif pos["y"] > initial_pos["y"] + platform_range and current_speed["vy"] > 0:
+                    new_vy = -current_speed["vy"]  # 上に反転
+                
+                # X方向のチェック
+                if pos["x"] < initial_pos["x"] - platform_range and current_speed["vx"] < 0:
+                    new_vx = -current_speed["vx"]  # 右に反転
+                elif pos["x"] > initial_pos["x"] + platform_range and current_speed["vx"] > 0:
+                    new_vx = -current_speed["vx"]  # 左に反転
+                
+                # 速度が変わった場合のみ更新
+                if new_vx != current_speed["vx"] or new_vy != current_speed["vy"]:
+                    memory["platform_speeds"][platform_index] = {"vx": new_vx, "vy": new_vy}
+                    self.set_platform_velocity(platform_index, new_vx, new_vy)
+
