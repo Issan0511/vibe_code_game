@@ -1,0 +1,92 @@
+{
+  "screen": {
+    "width": 800,
+    "height": 600,
+    "fps": 60
+  },
+  "player": {
+    "x": 200,
+    "width": 40,
+    "height": 60,
+    "color": [50, 150, 255],
+    "shoe": {
+      "width": 50,
+      "height": 15,
+      "color": [139, 69, 19]
+    }
+  },
+  "physics": {
+    "gravity": 0.8,
+    "jump_strength": -15,
+    "acceleration": 0.333,
+    "deceleration": 0.2,
+    "max_speed": 5.33,
+    "bg_scroll_speed": 5
+  },
+  "ground": {
+    "y_offset": 80,
+    "color": [60, 180, 60]
+  },
+  "background": {
+    "color": [135, 206, 235],
+    "tile_width": 800
+  },
+  "enemies": [
+    {
+      "world_x": 400,
+      "move_range": 80,
+      "speed": 2,
+      "width": 40,
+      "height": 40,
+      "use_gravity": true
+    },
+    {
+      "world_x": 800,
+      "move_range": 120,
+      "speed": 3,
+      "width": 40,
+      "height": 40,
+      "use_gravity": true
+    },
+    {
+      "world_x": 1200,
+      "move_range": 60,
+      "speed": 1.5,
+      "width": 40,
+      "height": 40,
+      "use_gravity": false
+    }
+  ],
+  "platforms": [
+    {
+      "world_x": 300,
+      "y_offset": 100,
+      "width": 150,
+      "height": 20
+    },
+    {
+      "world_x": 600,
+      "y_offset": 150,
+      "width": 120,
+      "height": 20
+    },
+    {
+      "world_x": 900,
+      "y_offset": 80,
+      "width": 180,
+      "height": 20
+    },
+    {
+      "world_x": 1300,
+      "y_offset": 120,
+      "width": 150,
+      "height": 20
+    }
+  ],
+  "goal": {
+    "world_x": 1600,
+    "width": 60,
+    "height": 80,
+    "color": [255, 215, 0]
+  }
+}
