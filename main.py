@@ -246,6 +246,7 @@ state_ref = {
     "config": config,
     "enemies": enemies,
     "bg_color": tuple(config['background']['color']),
+    "goal": goal,
 }
 api = GameAPI(state_ref)
 

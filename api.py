@@ -132,4 +132,45 @@ class GameAPI:
                 return None
         
         return current
+    
+    # ---- ゴール関連 ----
+    def move_goal(self, dx, dy=0):
+        """
+        ゴールの座標を相対的に移動する
+        dx: X軸方向の移動量（正で右、負で左）
+        dy: Y軸方向の移動量（正で下、負で上）デフォルトは0
+        """
+        goal = self.m.get("goal")
+        if goal is None:
+            return False
+        
+        goal.world_x += dx
+        goal.y += dy
+        return True
+    
+    def set_goal_position(self, x, y=None):
+        """
+        ゴールの座標を絶対位置で設定する
+        x: ワールド座標でのX位置
+        y: Y座標（Noneの場合は変更しない）
+        """
+        goal = self.m.get("goal")
+        if goal is None:
+            return False
+        
+        goal.world_x = x
+        if y is not None:
+            goal.y = y
+        return True
+    
+    def get_goal_position(self):
+        """
+        ゴールの現在の座標を取得する
+        戻り値: (world_x, y) のタプル、またはNone
+        """
+        goal = self.m.get("goal")
+        if goal is None:
+            return None
+        
+        return (goal.world_x, goal.y)
 
