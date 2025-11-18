@@ -93,11 +93,11 @@
   "ground_segments": [
     {
       "start_x": 0,
-      "end_x": 400
+      "end_x": 600
     },
     {
       "start_x": 850,
-      "end_x": 1100
+      "end_x": 1000
     },
     {
       "start_x": 1400,

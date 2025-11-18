@@ -59,8 +59,17 @@ class RemoteAPI:
         })
 
     def get_config(self, key):
-        # 必要なら state 側にも config を載せて同期する方が堅い
-        # とりあえずは original_config ベースで返す簡易版
+        # state から現在の config を取得する（動的変更を反映）
+        if hasattr(self, '_current_state') and 'config' in self._current_state:
+            keys = key.split('.')
+            current = self._current_state['config']
+            for k in keys:
+                if isinstance(current, dict) and k in current:
+                    current = current[k]
+                else:
+                    return None
+            return current
+        # フォールバック: state が無い場合は original_config を返す
         return self.get_original_config(key)
 
     # ---- 敵関連 ----
@@ -139,6 +148,29 @@ class RemoteAPI:
         return None
 
     # ---- 高レベルAPI ----
+    def spawn_enemy_periodically(self, state, memory, interval_ms=1000, spawn_chance=0.5, offset_x=400):
+        """
+        定期的にプレイヤーの先に敵を出現させる
+        
+        引数:
+            state: ゲーム状態
+            memory: メモリdict（"last_spawn_time"キーを使用）
+            interval_ms: 出現間隔（ミリ秒）
+            spawn_chance: 出現確率（0.0〜1.0）
+            offset_x: プレイヤーからのx方向のオフセット
+        """
+        if "last_spawn_time" not in memory:
+            memory["last_spawn_time"] = 0
+        
+        now = state["world"]["time_ms"]
+        px = state["player"]["x"]
+        py = state["player"]["y"]
+        
+        if now - memory["last_spawn_time"] > interval_ms:
+            memory["last_spawn_time"] = now
+            if self.rand() < spawn_chance:
+                self.spawn_enemy(x=px + offset_x, y=py)
+
     def enemy_chase_and_jump(self, state, memory, chase_distance=150, jump_chance=0.01, jump_cooldown_ms=500):
         """
         全敵をプレイヤー追尾させ、近い場合はランダムでジャンプ
@@ -164,6 +196,32 @@ class RemoteAPI:
                     if self.rand() < jump_chance:
                         self.enemy_jump(enemy_id)
                         memory["enemy_jump_cooldown"][enemy_id] = now
+
+    def goal_move_on_approach(self, state, memory, approach_distance=50, move_dy=-200, spawn_enemy_at_goal=True):
+        """
+        ゴールに接近したらゴールを移動し、元の位置に敵を出現させる（1回のみ）
+        
+        引数:
+            state: ゲーム状態
+            memory: メモリdict（"goal_approached"キーを使用）
+            approach_distance: 接近と判定する距離
+            move_dy: ゴールを移動させるy方向の距離
+            spawn_enemy_at_goal: ゴールの元の位置に敵を出現させるか
+        """
+        if "goal_approached" not in memory:
+            memory["goal_approached"] = False
+        
+        px = state["player"]["x"]
+        goal_pos = self.get_goal_pos()
+        
+        if goal_pos:
+            goal_dist = abs(px - goal_pos["x"])
+            
+            if goal_dist < approach_distance and not memory["goal_approached"]:
+                memory["goal_approached"] = True
+                if spawn_enemy_at_goal:
+                    self.spawn_enemy(x=goal_pos["x"], y=goal_pos["y"])
+                self.move_goal(0, move_dy)
 
     def platform_oscillate(self, memory, platform_indices=[0, 1], speeds=[(0, -1), (0, 1)], move_range=80):
         """
