@@ -20,12 +20,12 @@ class PromptBody(BaseModel):
 # AI_PROMPT.mdの内容を読み込み
 def load_system_prompt():
     try:
-        with open("AI_PROMPT.md", "r", encoding="utf-8") as f:
+        with open("../docs/AI_PROMPT.md", "r", encoding="utf-8") as f:
             content = f.read()
         
         # script_user.pyの内容をリアルタイムで読み込み
         try:
-            with open("script_user.py", "r", encoding="utf-8") as f:
+            with open("../scripts/script_user.py", "r", encoding="utf-8") as f:
                 current_script = f.read()
             
             # AI_PROMPT.md内の既存script_user.py部分を現在の内容で置き換え
@@ -175,11 +175,11 @@ async def update_script(body: PromptBody):
         comment = result.get("comment", "")
 
         # 3. script_user.py を上書き保存
-        with open("script_user.py", "w", encoding="utf-8") as f:
+        with open("../scripts/script_user.py", "w", encoding="utf-8") as f:
             f.write(code)
 
         # 4. 「リロードフラグ」を立てる
-        with open("reload.flag", "w", encoding="utf-8") as f:
+        with open("../reload.flag", "w", encoding="utf-8") as f:
             f.write("")
 
         return {
@@ -201,22 +201,22 @@ async def reset_script():
     """
     try:
         # script_user_default.py が存在するか確認
-        if not os.path.exists("script_user_default.py"):
+        if not os.path.exists("../scripts/examples/default.py"):
             return {
                 "status": "error",
-                "message": "デフォルトファイル (script_user_default.py) が見つかりません"
+                "message": "デフォルトファイル (default.py) が見つかりません"
             }
         
-        # script_user_default.py の内容を読み込む
-        with open("script_user_default.py", "r", encoding="utf-8") as f:
+        # default.py の内容を読み込む
+        with open("../scripts/examples/default.py", "r", encoding="utf-8") as f:
             default_code = f.read()
         
         # script_user.py を上書き
-        with open("script_user.py", "w", encoding="utf-8") as f:
+        with open("../scripts/script_user.py", "w", encoding="utf-8") as f:
             f.write(default_code)
         
         # リロードフラグを立てる
-        with open("reload.flag", "w", encoding="utf-8") as f:
+        with open("../reload.flag", "w", encoding="utf-8") as f:
             f.write("")
         
         return {

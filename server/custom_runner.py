@@ -1,204 +1,155 @@
-# 安全API（コマンド相当）
-import random
+# custom_runner.py
+import socket
 import json
+import sys
+import random
+import importlib
 
-def clamp(v, lo, hi):
-    return max(lo, min(hi, v))
+# 親ディレクトリをパスに追加
+sys.path.insert(0, '..')
+from scripts import script_user  # 来場者がいじるファイル
 
-class GameAPI:
-    def __init__(self, main_ref):
-        # main.py のグローバルか、Game クラスのインスタンスなどをぶら下げる
-        self.m = main_ref
-        # config.jsonから初期値を保持
+# ---- script_user から呼ばれる API（コマンドを貯めるだけ） ----
+class RemoteAPI:
+    def __init__(self):
+        self.commands = []
+        # config.json から元の値を読む（api.GameAPI と同じ発想）
         self.original_config = {}
         self._load_original_config()
 
     def _load_original_config(self):
-        """config.json から元の値を読み込む"""
         try:
-            with open('config.json', 'r', encoding='utf-8') as f:
+            with open('../config/config.json', 'r', encoding='utf-8') as f:
                 self.original_config = json.load(f)
-        except:
-            pass
+        except Exception:
+            self.original_config = {}
 
     def get_original_config(self, key):
-        """元のconfig値を取得（ネストキー対応）"""
         keys = key.split('.')
-        value = self.original_config
+        v = self.original_config
         for k in keys:
-            if isinstance(value, dict):
-                value = value.get(k)
+            if isinstance(v, dict):
+                v = v.get(k)
             else:
                 return None
-        return value
+        return v
 
     # ---- 乱数 ----
     def rand(self):
         return random.random()
 
-    # ---- パラメータ変更 ----
+    # ---- パラメータ変更系 → コマンドに変換 ----
     def set_gravity(self, g):
-        self.m["GRAVITY"] = clamp(g, -5.0, 5.0)
+        self.commands.append({
+            "op": "set_param",
+            "key": "gravity",
+            "value": g,
+        })
 
     def set_max_speed(self, v):
-        self.m["MAX_SPEED"] = clamp(v, 0.5, 30.0)
+        self.commands.append({
+            "op": "set_param",
+            "key": "max_speed",
+            "value": v,
+        })
+
+    def set_config(self, key, value):
+        self.commands.append({
+            "op": "set_config",
+            "key": key,
+            "value": value,
+        })
+
+    def get_config(self, key):
+        # state から現在の config を取得する（動的変更を反映）
+        if hasattr(self, '_current_state') and 'config' in self._current_state:
+            keys = key.split('.')
+            current = self._current_state['config']
+            for k in keys:
+                if isinstance(current, dict) and k in current:
+                    current = current[k]
+                else:
+                    return None
+            return current
+        # フォールバック: state が無い場合は original_config を返す
+        return self.get_original_config(key)
 
     # ---- 敵関連 ----
     def set_enemy_vel(self, enemy_id, vx, vy=None):
-        MAX_V = 15.0
+        cmd = {
+            "op": "set_enemy_vel",
+            "id": enemy_id,
+            "vx": vx,
+        }
         if vy is not None:
-            speed2 = vx*vx + vy*vy
-            if speed2 > MAX_V*MAX_V:
-                s = (MAX_V / (speed2 ** 0.5))
-                vx *= s
-                vy *= s
-        else:
-            # vyが指定されていない場合はvxのみクランプ
-            if abs(vx) > MAX_V:
-                vx = MAX_V if vx > 0 else -MAX_V
-        
-        for e in self.m["enemies"]:
-            if e.id == enemy_id:
-                e.use_api_control = True
-                e.vx = vx
-                # vyが指定されている場合のみ上書き（重力を無視する場合）
-                if vy is not None:
-                    e.vy = vy
-                break
+            cmd["vy"] = vy
+        self.commands.append(cmd)
 
     def enemy_jump(self, enemy_id):
-        """敵にジャンプさせる"""
-        jump_strength = -15  # プレイヤーと同じ値
-        for e in self.m["enemies"]:
-            if e.id == enemy_id:
-                # 敵が地面に接しているかどうかを確認
-                if e.y >= self.m.get("GROUND_Y", 0):
-                    e.vy = jump_strength
-                break
+        self.commands.append({
+            "op": "enemy_jump",
+            "id": enemy_id,
+        })
 
     def spawn_enemy(self, x, y):
-        from main import Enemy  # 循環 import 回避するなら工夫
-        if len(self.m["enemies"]) >= 300:
-            return
-        self.m["enemies"].append(
-            Enemy(world_x=x, y=y, move_range=100, speed=2)
-        )
+        self.commands.append({
+            "op": "spawn_enemy",
+            "x": x,
+            "y": y,
+        })
 
-    # ---- 背景色など ----
+    # ---- 背景色 ----
     def set_bg_color(self, rgb):
-        r, g, b = rgb
-        self.m["bg_color"] = (int(clamp(r,0,255)),
-                              int(clamp(g,0,255)),
-                              int(clamp(b,0,255)))
+        self.commands.append({
+            "op": "set_bg_color",
+            "color": list(rgb),
+        })
 
-    # ---- config上書き ----
-    def set_config(self, key, value):
-        """
-        configの値を上書きする
-        例: api.set_config("physics.gravity", 1.5)
-        例: api.set_config("player.x", 300)
-        """
-        keys = key.split('.')
-        config = self.m.get("config")
-        if config is None:
-            return False
-        
-        # ネストされたキーをたどる
-        current = config
-        for k in keys[:-1]:
-            if k not in current:
-                current[k] = {}
-            current = current[k]
-        
-        # 最後のキーに値を設定
-        current[keys[-1]] = value
-        return True
-    
-    def get_config(self, key):
-        """
-        configの値を取得する
-        例: api.get_config("physics.gravity")
-        """
-        keys = key.split('.')
-        config = self.m.get("config")
-        if config is None:
-            return None
-        
-        current = config
-        for k in keys:
-            if isinstance(current, dict) and k in current:
-                current = current[k]
-            else:
-                return None
-        
-        return current
-
-    # ---- ゴール関連 ----
+    # ---- ゴール ----
     def move_goal(self, dx, dy=0):
-        """
-        ゴールの座標を相対的に変更する
-        例: api.move_goal(100, -50)  # x方向に+100、y方向に-50移動
-        """
-        goal = self.m.get("goal")
-        if goal:
-            goal.world_x += dx
-            goal.y += dy
+        self.commands.append({
+            "op": "move_goal",
+            "dx": dx,
+            "dy": dy,
+        })
 
     def get_goal_pos(self):
-        """
-        ゴールの座標を取得する
-        戻り値: {"x": world_x, "y": y} または None
-        """
-        goal = self.m.get("goal")
-        if goal:
-            return {"x": goal.world_x, "y": goal.y}
+        # state から取得（main.py で state に goal を載せている）
+        if hasattr(self, '_current_state') and 'goal' in self._current_state:
+            return self._current_state['goal']
         return None
 
     def set_goal_pos(self, x, y):
-        """
-        ゴールの座標を絶対的に設定する
-        例: api.set_goal_pos(1600, 520)
-        """
-        goal = self.m.get("goal")
-        if goal:
-            goal.world_x = x
-            goal.y = y
+        self.commands.append({
+            "op": "set_goal_pos",
+            "x": x,
+            "y": y,
+        })
 
-    # ---- 足場関連 ----
+    # ---- 足場 ----
     def set_platform_velocity(self, platform_index, vx, vy):
-        """
-        足場の移動速度を設定する
-        platform_index: 足場のインデックス（0から始まる）
-        vx: x方向の速度（正で右、負で左）
-        vy: y方向の速度（正で下、負で上）
-        例: api.set_platform_velocity(0, 2, 0)  # 最初の足場を右に移動
-        例: api.set_platform_velocity(1, 0, -1) # 2番目の足場を上に移動
-        """
-        platforms = self.m.get("platforms")
-        if platforms and 0 <= platform_index < len(platforms):
-            platforms[platform_index].set_velocity(vx, vy)
+        self.commands.append({
+            "op": "set_platform_velocity",
+            "index": platform_index,
+            "vx": vx,
+            "vy": vy,
+        })
 
     def stop_platform(self, platform_index):
-        """
-        足場の移動を停止する
-        platform_index: 足場のインデックス（0から始まる）
-        """
-        platforms = self.m.get("platforms")
-        if platforms and 0 <= platform_index < len(platforms):
-            platforms[platform_index].stop()
+        self.commands.append({
+            "op": "stop_platform",
+            "index": platform_index,
+        })
 
     def get_platform_pos(self, platform_index):
-        """
-        足場の座標を取得する
-        戻り値: {"x": world_x, "y": y} または None
-        """
-        platforms = self.m.get("platforms")
-        if platforms and 0 <= platform_index < len(platforms):
-            platform = platforms[platform_index]
-            return {"x": platform.world_x, "y": platform.y}
+        # state から取得（main.py で state に platforms を載せている）
+        if hasattr(self, '_current_state') and 'platforms' in self._current_state:
+            platforms = self._current_state['platforms']
+            if 0 <= platform_index < len(platforms):
+                return platforms[platform_index]
         return None
 
-    # ---- 便利機能 ----
+    # ---- 高レベルAPI ----
     def spawn_enemy_periodically(self, state, memory, interval_ms=1000, spawn_chance=0.5, offset_x=400):
         """
         定期的にプレイヤーの先に敵を出現させる
@@ -225,13 +176,6 @@ class GameAPI:
     def enemy_chase_and_jump(self, state, memory, chase_distance=150, jump_chance=0.01, jump_cooldown_ms=500):
         """
         全敵をプレイヤー追尾させ、近い場合はランダムでジャンプ
-        
-        引数:
-            state: ゲーム状態
-            memory: メモリdict（"enemy_jump_cooldown"キーを使用）
-            chase_distance: ジャンプ判定する距離
-            jump_chance: ジャンプ確率（0.0〜1.0）
-            jump_cooldown_ms: ジャンプのクールダウン（ミリ秒）
         """
         if "enemy_jump_cooldown" not in memory:
             memory["enemy_jump_cooldown"] = {}
@@ -284,13 +228,6 @@ class GameAPI:
     def platform_oscillate(self, memory, platform_indices=[0, 1], speeds=[(0, -1), (0, 1)], move_range=80):
         """
         足場を往復運動させる（上下・左右・斜め対応）
-        
-        引数:
-            memory: メモリdict（"platform_initial_pos"、"platform_speeds"、"platform_range"キーを使用）
-            platform_indices: 制御する足場のインデックスリスト
-            speeds: 各足場の初期速度タプルのリスト [(vx1, vy1), (vx2, vy2), ...]
-                   vx: 正で右、負で左 / vy: 正で下、負で上
-            move_range: 移動範囲（ピクセル）
         """
         if "platform_initial_pos" not in memory:
             memory["platform_initial_pos"] = {}
@@ -336,3 +273,67 @@ class GameAPI:
                     memory["platform_speeds"][platform_index] = {"vx": new_vx, "vy": new_vy}
                     self.set_platform_velocity(platform_index, new_vx, new_vy)
 
+
+def main():
+    host = "127.0.0.1"
+    port = 50000
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((host, port))
+    f_r = sock.makefile("r")
+    f_w = sock.makefile("w")
+
+    api = RemoteAPI()
+    did_init = False
+
+    # script_user をリロードして最新のコードを読み込む
+    importlib.reload(script_user)
+
+    while True:
+        line = f_r.readline()
+        if not line:
+            break
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        if msg.get("type") != "tick":
+            continue
+
+        state = msg["state"]
+        
+        # API に現在の state を保持させる
+        api._current_state = state
+
+        # 初回だけ on_init を呼ぶ（あれば）
+        if not did_init and hasattr(script_user, "on_init"):
+            try:
+                api.commands.clear()
+                script_user.on_init(state, api)
+                cmds_init = api.commands[:]
+                api.commands.clear()
+                if cmds_init:
+                    out = json.dumps({"type": "commands", "commands": cmds_init})
+                    f_w.write(out + "\n")
+                    f_w.flush()
+            except Exception as e:
+                print("on_init error:", e, file=sys.stderr)
+            did_init = True
+
+        # 毎フレーム on_tick 呼び出し
+        try:
+            api.commands.clear()
+            script_user.on_tick(state, api)
+            cmds = api.commands[:]
+            api.commands.clear()
+        except Exception as e:
+            print("on_tick error:", e, file=sys.stderr)
+            cmds = []
+
+        out = json.dumps({"type": "commands", "commands": cmds})
+        f_w.write(out + "\n")
+        f_w.flush()
+
+if __name__ == "__main__":
+    main()

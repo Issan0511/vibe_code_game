@@ -15,7 +15,7 @@ from level import load_level, is_on_ground
 # =========================
 # 設定の読み込み
 # =========================
-with open('config.json', 'r', encoding='utf-8') as f:
+with open('../config/config.json', 'r', encoding='utf-8') as f:
     config = json.load(f)
 
 # 設定値を変数に展開
@@ -43,7 +43,7 @@ font = pygame.font.SysFont(None, 24)
 
 # 背景画像の読み込み
 try:
-    bg_image = pygame.image.load('background.png').convert()
+    bg_image = pygame.image.load('../assets/background.png').convert()
     bg_width = bg_image.get_width()
     bg_height = bg_image.get_height()
 except:
@@ -134,7 +134,7 @@ class CustomConnection:
 
         # custom_runner.py を起動
         self.proc = subprocess.Popen(
-            [sys.executable, "custom_runner.py"],
+            [sys.executable, "../server/custom_runner.py"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
         )
@@ -316,8 +316,8 @@ while running:
     now = pygame.time.get_ticks()
     if now - last_reload_check > RELOAD_INTERVAL_MS:
         last_reload_check = now
-        if os.path.exists("reload.flag"):
-            os.remove("reload.flag")
+        if os.path.exists("../reload.flag"):
+            os.remove("../reload.flag")
             custom_conn.restart()   # custom_runner を再起動 → 新しい script_user.py がimportされる
     # =========================
     # イベント処理
