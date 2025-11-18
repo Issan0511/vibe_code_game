@@ -65,9 +65,11 @@ async def index():
   <p>例: 「敵が定期的に降って来るようにして」</p>
   <textarea id="prompt" placeholder="ここにやりたい改変内容を書いてください"></textarea><br>
   <button id="send">送信</button>
+  <button id="reset" style="margin-left: 8px; background-color: #dc3545; color: white;">リセット</button>
   <div class="status" id="status"></div>
   <script>
     const sendBtn = document.getElementById("send");
+    const resetBtn = document.getElementById("reset");
     const promptEl = document.getElementById("prompt");
     const statusEl = document.getElementById("status");
 
@@ -90,6 +92,27 @@ async def index():
         }
         const json = await res.json();
         statusEl.textContent = json.comment || "スクリプトを更新しました。";
+      } catch (e) {
+        statusEl.textContent = "通信エラー: " + e;
+      }
+    };
+
+    resetBtn.onclick = async () => {
+      if (!confirm("script_user.pyを初期状態に戻しますか？")) {
+        return;
+      }
+      statusEl.textContent = "リセット中...";
+      try {
+        const res = await fetch("/reset_script", {
+          method: "POST",
+        });
+        if (!res.ok) {
+          statusEl.textContent = "エラー: " + res.status + " " + res.statusText;
+          return;
+        }
+        const json = await res.json();
+        statusEl.textContent = json.message || "スクリプトを初期状態に戻しました。";
+        promptEl.value = "";
       } catch (e) {
         statusEl.textContent = "通信エラー: " + e;
       }
@@ -169,6 +192,42 @@ async def update_script(body: PromptBody):
         return {
             "status": "error",
             "error": str(e)
+        }
+
+@app.post("/reset_script")
+async def reset_script():
+    """
+    script_user.py を初期状態（script_user_default.py）に戻す
+    """
+    try:
+        # script_user_default.py が存在するか確認
+        if not os.path.exists("script_user_default.py"):
+            return {
+                "status": "error",
+                "message": "デフォルトファイル (script_user_default.py) が見つかりません"
+            }
+        
+        # script_user_default.py の内容を読み込む
+        with open("script_user_default.py", "r", encoding="utf-8") as f:
+            default_code = f.read()
+        
+        # script_user.py を上書き
+        with open("script_user.py", "w", encoding="utf-8") as f:
+            f.write(default_code)
+        
+        # リロードフラグを立てる
+        with open("reload.flag", "w", encoding="utf-8") as f:
+            f.write("")
+        
+        return {
+            "status": "ok",
+            "message": "script_user.py を初期状態に戻しました。ゲームに反映されます。"
+        }
+    
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"リセット中にエラーが発生しました: {str(e)}"
         }
 
 @app.get("/")

@@ -20,6 +20,7 @@ def on_tick(state, api):
 - **while ループは禁止**: for と if のみ使用可能
 - **グローバル変数**: `memory` 辞書にまとめて管理すること
 - **API制限**: `api` に用意されているメソッドのみ使用可能（以下を参照）
+- **コメント**: 非エンジニアが読めるよう、最低限のコメントを付けること（詳細は後述）
 
 ## 利用可能な API
 
@@ -316,6 +317,26 @@ def on_tick(state, api):
 - **エラー処理**: state や api が None の可能性は考慮不要です（常に有効な値が渡されます）
 - **パフォーマンス**: on_tick は毎フレーム呼ばれるため、重い処理は避けてください
 
+## コメントのガイドライン
+
+**目的**: 非エンジニアのユーザー（来場者）が後からコードを読んで理解できるようにする
+
+**必須コメント**:
+1. **セクション区切り**: 処理の大きなまとまりごとに `# ---- 説明 ----` 形式で区切る
+2. **複雑なロジック**: 条件分岐や計算が複雑な場合、「何をしているか」を一言で説明
+3. **数値の意味**: マジックナンバー（500, 0.8など）の横に単位や意味を記載
+
+**コメント不要な箇所**:
+- API呼び出しの意味が明白な場合（例: `api.spawn_enemy()`）
+- 変数名から意味が明白な場合
+- シンプルな代入や取得処理
+
+**コメントの書き方**:
+- ✅ 良い例: `# 3秒ごとに敵を出現`、`# プレイヤーに近い敵だけジャンプ`
+- ❌ 悪い例: `# spawn_enemy関数を呼び出す`、`# ifで条件判定`
+
+**バランス**: コメントが多すぎるとコードが読みにくくなるため、**本当に必要な箇所だけ**に絞ること
+
 ---
 
 ## 生成例
@@ -327,7 +348,7 @@ def on_tick(state, api):
 **生成JSON:**
 ```json
 {
-  "script_user": "# \u6765\u5834\u8005\u304c\u3044\u3058\u308b\u30b9\u30af\u30ea\u30d7\u30c8\n\nmemory = {}\n\ndef on_init(state, api):\n    pass\n\ndef on_tick(state, api):\n    # \u9ad8\u983b\u5ea6\u3067\u6575\u3092\u51fa\u73fe\n    api.spawn_enemy_periodically(state, memory, interval_ms=500, spawn_chance=1.0)\n",
+  "script_user": "# 来場者がいじるスクリプト\n\nmemory = {}\n\ndef on_init(state, api):\n    pass\n\ndef on_tick(state, api):\n    # 0.5秒ごとに敵を出現（通常より高頻度）\n    api.spawn_enemy_periodically(state, memory, interval_ms=500, spawn_chance=1.0)\n",
   "comment": "0.5秒ごとに100%の確率で敵を出現させるようにしました。通常よりも多くの敵が出現します。"
 }
 ```
@@ -339,7 +360,7 @@ def on_tick(state, api):
 **生成JSON:**
 ```json
 {
-  "script_user": "# \u6765\u5834\u8005\u304c\u3044\u3058\u308b\u30b9\u30af\u30ea\u30d7\u30c8\n\nmemory = {}\n\ndef on_init(state, api):\n    pass\n\ndef on_tick(state, api):\n    # \u30b4\u30fc\u30eb\u304c\u9003\u3052\u308b\n    api.goal_move_on_approach(state, memory, approach_distance=100, move_dy=-200)\n    \n    # \u8db3\u5834\u304c\u52d5\u304f\n    api.platform_oscillate(memory, move_range=100)\n    \n    # \u6575\u304c\u8ffd\u3044\u304b\u3051\u3066\u304f\u308b\n    api.enemy_chase_and_jump(state, memory, chase_distance=200, jump_chance=0.05)\n",
+  "script_user": "# 来場者がいじるスクリプト\n\nmemory = {}\n\ndef on_init(state, api):\n    pass\n\ndef on_tick(state, api):\n    # ---- ゴールが逃げる演出 ----\n    # 100ピクセル以内に近づくと上に逃げる\n    api.goal_move_on_approach(state, memory, approach_distance=100, move_dy=-200)\n    \n    # ---- 足場を動かす ----\n    # 上下に100ピクセルの範囲で往復運動\n    api.platform_oscillate(memory, move_range=100)\n    \n    # ---- 敵の追跡とジャンプ ----\n    # 200ピクセル以内に近づくと5%の確率でジャンプ\n    api.enemy_chase_and_jump(state, memory, chase_distance=200, jump_chance=0.05)\n",
   "comment": "3つの機能を追加しました。(1)プレイヤーがゴールに100ピクセル以内に近づくとゴールが上に逃げます。(2)足場が上下に100ピクセルの範囲で動きます。(3)敵がプレイヤーを追いかけ、近づくとジャンプして攻撃してきます。"
 }
 ```
@@ -351,7 +372,7 @@ def on_tick(state, api):
 **生成JSON:**
 ```json
 {
-  "script_user": "# \u6765\u5834\u8005\u304c\u3044\u3058\u308b\u30b9\u30af\u30ea\u30d7\u30c8\n\nmemory = {}\n\ndef on_init(state, api):\n    # \u91cd\u529b\u3092\u5f31\u304f\u3057\u3066\u30b8\u30e3\u30f3\u30d7\u3092\u9ad8\u304f\u3059\u308b\n    api.set_gravity(0.3)\n    \n    # \u79fb\u52d5\u901f\u5ea6\u3092\u4e0a\u3052\u308b\n    original_max_speed = api.get_original_config(\"physics.max_speed\")\n    if original_max_speed:\n        api.set_config(\"physics.max_speed\", original_max_speed * 1.5)\n\ndef on_tick(state, api):\n    pass\n",
+  "script_user": "# 来場者がいじるスクリプト\n\nmemory = {}\n\ndef on_init(state, api):\n    # ---- 飛んでいるような感覚にする設定 ----\n    # 重力を弱くしてジャンプを高くする（通常の30%）\n    api.set_gravity(0.3)\n    \n    # 移動速度を1.5倍に上げる\n    original_max_speed = api.get_original_config(\"physics.max_speed\")\n    if original_max_speed:\n        api.set_config(\"physics.max_speed\", original_max_speed * 1.5)\n\ndef on_tick(state, api):\n    pass\n",
   "comment": "『飛ぶ』機能はAPIにはありませんが、代わりに重力を弱くしてジャンプが高く飛べるようにし、移動速度を1.5倍にしました。空中での移動がスムーズになり、飛んでいるような感覚になります。"
 }
 ```
