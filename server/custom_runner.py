@@ -4,9 +4,12 @@ import json
 import sys
 import random
 import importlib
+import os
 
-# 親ディレクトリをパスに追加
-sys.path.insert(0, '..')
+# プロジェクトルートをパスに追加
+project_root = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, project_root)
+
 from scripts import script_user  # 来場者がいじるファイル
 
 # ---- script_user から呼ばれる API（コマンドを貯めるだけ） ----
@@ -19,7 +22,7 @@ class RemoteAPI:
 
     def _load_original_config(self):
         try:
-            with open('../config/config.json', 'r', encoding='utf-8') as f:
+            with open('config/config.json', 'r', encoding='utf-8') as f:
                 self.original_config = json.load(f)
         except Exception:
             self.original_config = {}
@@ -96,6 +99,25 @@ class RemoteAPI:
             "op": "spawn_enemy",
             "x": x,
             "y": y,
+        })
+
+    def spawn_snake(self, x, y, width=60, height=20, speed=3, move_range=150):
+        """重力を受けない蛇タイプの敵を生成"""
+        self.commands.append({
+            "op": "spawn_snake",
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "speed": speed,
+            "move_range": move_range,
+        })
+
+    def set_max_jumps(self, max_jumps):
+        """プレイヤーの最大ジャンプ回数を設定（複数段ジャンプ）"""
+        self.commands.append({
+            "op": "set_max_jumps",
+            "value": int(max_jumps),
         })
 
     # ---- 背景色 ----

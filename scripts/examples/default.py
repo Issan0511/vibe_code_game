@@ -4,10 +4,10 @@ memory = {}
 
 def on_init(state, api):
     # ---------- プレイヤーの速さ1.5倍 ----------
-    max_speed = api.get_config("physics.max_speed")
-    acceleration = api.get_config("physics.acceleration")
-    api.set_config("physics.max_speed", max_speed * 1.5)
-    api.set_config("physics.acceleration", acceleration * 1.5)
+    # max_speed = api.get_config("physics.max_speed")
+    # acceleration = api.get_config("physics.acceleration")
+    # api.set_config("physics.max_speed", max_speed * 1.5)
+    # api.set_config("physics.acceleration", acceleration * 1.5)
     pass
   
 def on_tick(state, api):

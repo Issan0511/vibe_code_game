@@ -27,6 +27,16 @@ class Enemy:
         self.vx = 0  # x方向の速度（API制御用）
         self.vy = 0  # y方向の速度
         self.use_api_control = False  # APIからの制御を使うかどうか
+        
+        # 画像読み込み
+        try:
+            self.image = pygame.image.load('assets/enemy.png').convert_alpha()
+            # 画像を1.2倍にスケール
+            self.image = pygame.transform.scale(self.image, (int(self.width * 1.2), int(self.height * 1.2)))
+            self.use_image = True
+        except:
+            self.image = None
+            self.use_image = False
 
     def move_patrol(self):
         """左右に往復運動"""
@@ -87,10 +97,26 @@ class Enemy:
     def draw(self, surface, camera_x):
         # world_x を camera_x でずらして画面上の位置に変換
         screen_x = int(self.world_x - camera_x)
-        rect = pygame.Rect(screen_x - self.width // 2,
-                           self.y - self.height,  # yは足元位置として使う
-                           self.width, self.height)
-        pygame.draw.rect(surface, self.color, rect)
+        
+        if self.use_image and self.image:
+            # 画像を描画
+            image_width = int(self.width * 1.2)
+            image_height = int(self.height * 1.2)
+            image_x = screen_x - image_width // 2
+            image_y = self.y - image_height  # 足元を基準に
+            
+            # 向きに応じて反転（デフォルトは左向き、direction=1で右向き）
+            if self.direction == 1:
+                flipped_image = pygame.transform.flip(self.image, True, False)
+                surface.blit(flipped_image, (image_x, image_y))
+            else:
+                surface.blit(self.image, (image_x, image_y))
+        else:
+            # フォールバック: 矩形描画
+            rect = pygame.Rect(screen_x - self.width // 2,
+                               self.y - self.height,
+                               self.width, self.height)
+            pygame.draw.rect(surface, self.color, rect)
 
     def get_rect(self, camera_x):
         """当たり判定用の矩形を返す"""

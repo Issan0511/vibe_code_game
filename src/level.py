@@ -10,7 +10,7 @@ class Platform:
         self.y = y
         self.width = width
         self.height = height
-        self.color = (139, 69, 19)
+        self.color = (0, 0, 0)
 
         # 移動関連
         self.vx = 0
@@ -40,7 +40,8 @@ class Platform:
     def draw(self, surface, camera_x):
         screen_x = int(self.world_x - camera_x)
         rect = pygame.Rect(screen_x, self.y, self.width, self.height)
-        pygame.draw.rect(surface, self.color, rect)
+        pygame.draw.rect(surface, (255, 255, 255), rect)  # 白で塗りつぶし
+        pygame.draw.rect(surface, self.color, rect, 3)  # 黒枠線(線幅3px)
 
     def get_rect(self, camera_x):
         screen_x = int(self.world_x - camera_x)
@@ -87,12 +88,14 @@ def load_level(config, ground_y):
     """
     config から platforms, ground_segments, goal をまとめて生成
     """
+    PLATFORM_HEIGHT = 20  # 足場の高さ（固定値）
+    
     platforms = [
         Platform(
             world_x=p['world_x'],
             y=ground_y - p['y_offset'],
             width=p['width'],
-            height=p['height']
+            height=PLATFORM_HEIGHT
         )
         for p in config['platforms']
     ]

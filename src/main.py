@@ -15,7 +15,7 @@ from level import load_level, is_on_ground
 # =========================
 # 設定の読み込み
 # =========================
-with open('../config/config.json', 'r', encoding='utf-8') as f:
+with open('config/config.json', 'r', encoding='utf-8') as f:
     config = json.load(f)
 
 # 設定値を変数に展開
@@ -43,7 +43,7 @@ font = pygame.font.SysFont(None, 24)
 
 # 背景画像の読み込み
 try:
-    bg_image = pygame.image.load('../assets/background.png').convert()
+    bg_image = pygame.image.load('assets/background.png').convert()
     bg_width = bg_image.get_width()
     bg_height = bg_image.get_height()
 except:
@@ -134,7 +134,7 @@ class CustomConnection:
 
         # custom_runner.py を起動
         self.proc = subprocess.Popen(
-            [sys.executable, "../server/custom_runner.py"],
+            [sys.executable, "server/custom_runner.py"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
         )
@@ -231,6 +231,25 @@ def apply_command(cmd):
                   width=40, height=40, use_gravity=True)
         )
 
+    elif op == "spawn_snake":
+        if len(enemies) >= 300:
+            return
+        x = float(cmd.get("x", camera_x + 800))
+        y = float(cmd.get("y", 300))
+        width = int(cmd.get("width", 60))
+        height = int(cmd.get("height", 20))
+        speed = float(cmd.get("speed", 3))
+        move_range = int(cmd.get("move_range", 150))
+        snake = Enemy(world_x=x, y=y, move_range=move_range, speed=speed,
+                     width=width, height=height, use_gravity=False)
+        snake.color = (0, 200, 0)  # 緑色で蛇らしく
+        enemies.append(snake)
+
+    elif op == "set_max_jumps":
+        max_jumps = int(cmd.get("value", 2))
+        player.max_jumps = max(1, min(max_jumps, 10))  # 1〜10回の範囲
+        player.jump_count = 0
+
     elif op == "set_enemy_vel":
         eid = cmd.get("id")
         vx = float(cmd.get("vx", 0.0))
@@ -316,8 +335,8 @@ while running:
     now = pygame.time.get_ticks()
     if now - last_reload_check > RELOAD_INTERVAL_MS:
         last_reload_check = now
-        if os.path.exists("../reload.flag"):
-            os.remove("../reload.flag")
+        if os.path.exists("reload.flag"):
+            os.remove("reload.flag")
             custom_conn.restart()   # custom_runner を再起動 → 新しい script_user.py がimportされる
     # =========================
     # イベント処理
@@ -365,10 +384,12 @@ while running:
             camera_vx += accel
             if camera_vx > max_spd:
                 camera_vx = max_spd
+            player.facing_right = True  # 右向き
         elif keys[pygame.K_LEFT]:
             camera_vx -= accel
             if camera_vx < -max_spd:
                 camera_vx = -max_spd
+            player.facing_right = False  # 左向き
         else:
             # キーが押されていない時は減速
             if camera_vx > 0:
@@ -533,7 +554,8 @@ while running:
         if visible_start_x < visible_end_x:
             ground_width = visible_end_x - visible_start_x
             ground_rect = pygame.Rect(visible_start_x, GROUND_Y, ground_width, SCREEN_HEIGHT - GROUND_Y)
-            pygame.draw.rect(screen, tuple(config['ground']['color']), ground_rect)
+            pygame.draw.rect(screen, (255, 255, 255), ground_rect)  # 白で塗りつぶし
+            pygame.draw.rect(screen, tuple(config['ground']['color']), ground_rect, 3)  # 黒枠線(線幅3px)
 
     # プレイヤー（画面上で位置固定）
     player.draw(screen)

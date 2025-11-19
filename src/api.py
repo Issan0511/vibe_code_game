@@ -16,7 +16,7 @@ class GameAPI:
     def _load_original_config(self):
         """config.json から元の値を読み込む"""
         try:
-            with open('../config/config.json', 'r', encoding='utf-8') as f:
+            with open('config/config.json', 'r', encoding='utf-8') as f:
                 self.original_config = json.load(f)
         except:
             pass
@@ -83,6 +83,23 @@ class GameAPI:
         self.m["enemies"].append(
             Enemy(world_x=x, y=y, move_range=100, speed=2)
         )
+
+    def spawn_snake(self, x, y, width=60, height=20, speed=3, move_range=150):
+        """重力を受けない蛇タイプの敵を生成"""
+        from main import Enemy
+        if len(self.m["enemies"]) >= 300:
+            return
+        snake = Enemy(world_x=x, y=y, move_range=move_range, speed=speed,
+                     width=width, height=height, use_gravity=False)
+        snake.color = (0, 200, 0)  # 緑色
+        self.m["enemies"].append(snake)
+
+    def set_max_jumps(self, max_jumps):
+        """プレイヤーの最大ジャンプ回数を設定（複数段ジャンプ）"""
+        player = self.m.get("player")
+        if player:
+            player.max_jumps = max(1, min(int(max_jumps), 10))  # 1〜10回の範囲
+            player.jump_count = 0
 
     # ---- 背景色など ----
     def set_bg_color(self, rgb):
