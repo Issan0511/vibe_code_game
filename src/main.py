@@ -74,6 +74,13 @@ display_text = None
 display_text_timer = 0
 display_text_color = (255, 255, 255)
 
+# AIステータス表示用（右上に常時表示）
+ai_status_text = None
+ai_status_timer = 0  # プロンプト表示用のタイマー
+last_generating_check = 0
+last_prompt_check = 0
+prompt_flag_shown = False  # プロンプトフラグを既に読み込んだかどうか
+
 # =========================
 # 背景（単色＋地面を自前描画）
 #   → 実際には画像を読み込んでもOK
@@ -224,6 +231,7 @@ def apply_command(cmd):
     global config, display_text, display_text_timer, display_text_color
     global enemies, platforms, goal, cliffs, SCREEN_WIDTH, SCREEN_HEIGHT, FPS, GROUND_Y, BG_WIDTH
     global camera_x, camera_vx, camera_target_x
+    global ai_status_text, ai_status_timer, last_generating_check, last_prompt_check, prompt_flag_shown
 
     op = cmd.get("op")
 
@@ -240,7 +248,6 @@ def apply_command(cmd):
     elif op == "set_config":
         key = cmd.get("key", "")
         val = cmd.get("value")
-        print(f"[DEBUG] main.py received set_config: {key} = {val}") # Debug print
         keys = key.split(".")
         cur = config
         for k in keys[:-1]:
@@ -490,6 +497,15 @@ def apply_command(cmd):
         display_text_timer = int(duration * FPS)
         display_text_color = tuple(color)
 
+    elif op == "display_text":
+        text = cmd.get("text", "")
+        duration = float(cmd.get("duration", 3.0))
+        color = cmd.get("color", [255, 255, 255])
+        
+        display_text = text
+        display_text_timer = int(duration * FPS)
+        display_text_color = tuple(color)
+
     elif op == "runner_log":
         # custom_runner からのログを表示
         msg = cmd.get("msg", "")
@@ -508,6 +524,7 @@ def apply_command(cmd):
 def reset_game():
     global game_over, game_clear, camera_x, camera_vx, enemies, platforms, goal, config, cliffs
     global camera_target_x
+    global ai_status_text, ai_status_timer, prompt_flag_shown
     
     # 設定を再読み込み（オブジェクトIDを維持して更新）
     try:
@@ -546,6 +563,11 @@ def reset_game():
     
     # 崖情報を更新
     cliffs = config.get('cliffs', [])
+    
+    # AIステータステキストをクリア
+    ai_status_text = None
+    ai_status_timer = 0
+    prompt_flag_shown = False
     
     # custom_runner を再起動（script_user.py の再読み込みと init 実行）
     custom_conn.restart()
@@ -595,6 +617,41 @@ while running:
             if event.key == pygame.K_SPACE:
                 player.release_jump()
 
+    # =========================
+    # AIステータスチェック（0.5秒に1回）
+    # =========================
+    current_time = pygame.time.get_ticks()
+    
+    # コード生成中フラグをチェック
+    if current_time - last_generating_check > 500:
+        last_generating_check = current_time
+        if os.path.exists("status_generating.flag"):
+            try:
+                with open("status_generating.flag", "r", encoding="utf-8") as f:
+                    ai_status_text = f.read().strip()
+                    ai_status_timer = 1800  # 30秒の上限（60fps想定）
+                    prompt_flag_shown = False  # プロンプトはまだ表示されていない
+            except:
+                pass
+        elif os.path.exists("status_prompt.flag") and not prompt_flag_shown:
+            # プロンプト表示フラグをチェック（一度だけ読み込む）
+            try:
+                with open("status_prompt.flag", "r", encoding="utf-8") as f:
+                    ai_status_text = f.read().strip()
+                    ai_status_timer = 1800  # 30秒間表示（60fps想定）
+                    prompt_flag_shown = True
+                # 読み込んだらフラグを削除
+                os.remove("status_prompt.flag")
+            except:
+                pass
+        else:
+            # どちらのフラグもない場合はタイマーをカウントダウン
+            if ai_status_timer > 0:
+                ai_status_timer -= 1
+                if ai_status_timer == 0:
+                    ai_status_text = None
+                    prompt_flag_shown = False
+    
     # =========================
     # 入力処理
     # =========================
@@ -857,7 +914,7 @@ while running:
         text_surf = font.render(info_text, True, (0, 0, 0))
         screen.blit(text_surf, (10, 10))
 
-    # カスタムテキスト表示（右上） - シンプルな表示
+    # カスタムテキスト表示(右上) - シンプルな表示
     if display_text and display_text_timer > 0:
         # 黒文字、背景なし、枠線なし
         text_surf = large_font.render(display_text, True, (0, 0, 0)) # 強制的に黒
@@ -869,6 +926,14 @@ while running:
         screen.blit(text_surf, (text_x, text_y))
 
         display_text_timer -= 1
+    
+    # AIステータステキスト表示（右上、display_textの下）
+    if ai_status_text:
+        status_surf = large_font.render(ai_status_text, True, (0, 0, 0))
+        status_w, status_h = status_surf.get_size()
+        status_x = SCREEN_WIDTH - status_w - 10
+        status_y = 35  # display_textの下に表示
+        screen.blit(status_surf, (status_x, status_y))
 
     pygame.display.flip()
 
