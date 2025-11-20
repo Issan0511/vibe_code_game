@@ -2,20 +2,69 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 import openai
 
 import os
+import re
+import json
 from dotenv import load_dotenv
 
 
 load_dotenv()
 app = FastAPI()
 
+# CORS設定を追加（ngrokなど外部からのアクセスに対応）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # すべてのオリジンを許可（開発用）
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],  # 必要なメソッドのみ許可
+    allow_headers=["*"],  # すべてのヘッダーを許可
+)
+
 class PromptBody(BaseModel):
     prompt: str
+
+
+# ストリーム出力用の区切りトークン
+COMMENT_START_TOKEN = "[[[COMMENT_START]]]"
+COMMENT_END_TOKEN = "[[[COMMENT_END]]]"
+CODE_START_TOKEN = "[[[CODE_START]]]"
+CODE_END_TOKEN = "[[[CODE_END]]]"
+
+
+def extract_code_block(full_text: str) -> str:
+    """
+    モデル出力テキストから CODE 部分だけを取り出す。
+    見つからなければ空文字を返す。
+    """
+    start = full_text.find(CODE_START_TOKEN)
+    if start == -1:
+        return ""
+    start += len(CODE_START_TOKEN)
+    end = full_text.find(CODE_END_TOKEN, start)
+    if end == -1:
+        return ""
+    return full_text[start:end].strip()
+
+
+def extract_comment_block(full_text: str) -> str:
+    """
+    モデル出力テキストから COMMENT 部分だけを取り出す。
+    見つからなければ空文字を返す。
+    """
+    start = full_text.find(COMMENT_START_TOKEN)
+    if start == -1:
+        return ""
+    start += len(COMMENT_START_TOKEN)
+    end = full_text.find(COMMENT_END_TOKEN, start)
+    if end == -1:
+        return ""
+    return full_text[start:end].strip()
+
 
 # AI_PROMPT.mdの内容を読み込み
 def load_system_prompt():
@@ -29,10 +78,12 @@ def load_system_prompt():
                 current_script = f.read()
             
             # AI_PROMPT.md内の既存script_user.py部分を現在の内容で置き換え
-            import re
             pattern = r'## 既存の script_user\.py\n\n現在の `script_user\.py` の内容は以下の通りです：\n\n```python\n.*?\n```'
-            replacement = f'## 既存の script_user.py\n\n現在の `script_user.py` の内容は以下の通りです：\n\n```python\n{current_script}\n```'
-            
+            replacement = (
+                "## 既存の script_user.py\n\n"
+                "現在の `script_user.py` の内容は以下の通りです：\n\n"
+                f"```python\n{current_script}\n```"
+            )
             content = re.sub(pattern, replacement, content, flags=re.DOTALL)
             
         except Exception as e:
@@ -42,6 +93,7 @@ def load_system_prompt():
         return content
     except Exception as e:
         return f"エラー: AI_PROMPT.md が読み込めませんでした - {e}"
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -68,55 +120,132 @@ async def index():
   <button id="reset" style="margin-left: 8px; background-color: #dc3545; color: white;">リセット</button>
   <div class="status" id="status"></div>
   <script>
+    console.log("JavaScript loaded successfully!");
+    
     const sendBtn = document.getElementById("send");
     const resetBtn = document.getElementById("reset");
     const promptEl = document.getElementById("prompt");
     const statusEl = document.getElementById("status");
-
+    
+    console.log("Elements found:", {sendBtn, resetBtn, promptEl, statusEl});
+    
+    // シンプルなテストから始める
     sendBtn.onclick = async () => {
+      console.log("Send button clicked!");
       const prompt = promptEl.value.trim();
       if (!prompt) {
         statusEl.textContent = "プロンプトを入力してください。";
         return;
       }
+      
       statusEl.textContent = "送信中...";
+      
       try {
-        const res = await fetch("/update_script", {
+        const res = await fetch("/update_script_stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),
         });
+        console.log("Response status:", res.status, res.statusText);
+        
         if (!res.ok) {
           statusEl.textContent = "エラー: " + res.status + " " + res.statusText;
           return;
         }
-        const json = await res.json();
-        statusEl.textContent = json.comment || "スクリプトを更新しました。";
+        
+        // ストリーミングレスポンスの処理
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let commentShown = false;
+        
+        console.log("Starting to read stream");
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            // ストリーム終了時に残りのデータをデコード
+            const remaining = decoder.decode();
+            if (remaining) {
+              buffer += remaining;
+              console.log("Added remaining data:", remaining);
+            }
+            console.log("Stream ended, final buffer length:", buffer.length);
+            console.log("Final buffer content:", buffer.substring(0, 200));
+            break;
+          }
+          
+          // 各チャンクをデコードしてバッファに追加
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+          
+          // デバッグ: バッファの現在の状態を確認
+          console.log("Buffer updated, length:", buffer.length, "ends with:", buffer.slice(-50));
+          
+          // コメント終了トークンを検出したらすぐに表示
+          if (!commentShown && buffer.includes("[[[COMMENT_END]]]")) {
+            const commentStart = buffer.indexOf("[[[COMMENT_START]]]");
+            const commentEnd = buffer.indexOf("[[[COMMENT_END]]]");
+            if (commentStart !== -1 && commentEnd !== -1) {
+              // COMMENT_START_TOKEN の長さを加算して実際のコメント開始位置を取得
+              const actualCommentStart = commentStart + 19; // [[[COMMENT_START]]] の長さ
+              const comment = buffer.substring(actualCommentStart, commentEnd).trim();
+              statusEl.textContent = comment + "\\n\\nコード生成中...";
+              commentShown = true;
+              console.log("Comment displayed:", comment);
+              console.log("Comment start pos:", commentStart, "actual start:", actualCommentStart, "end:", commentEnd);
+            }
+          }
+        }
+        
+        // ストリーム完了
+        if (commentShown) {
+          const commentStart = buffer.indexOf("[[[COMMENT_START]]]");
+          const commentEnd = buffer.indexOf("[[[COMMENT_END]]]");
+          const actualCommentStart = commentStart + 19; // [[[COMMENT_START]]] の長さ
+          const comment = buffer.substring(actualCommentStart, commentEnd).trim();
+          statusEl.textContent = comment + "\\n\\n✓ 完了しました。";
+        } else {
+          statusEl.textContent = "✓ 完了しました。";
+        }
+        console.log("Stream processing completed");
+        
       } catch (e) {
-        statusEl.textContent = "通信エラー: " + e;
+        statusEl.textContent = "通信エラー: " + e.message;
+        console.error("Error:", e);
       }
     };
 
     resetBtn.onclick = async () => {
+      console.log("Reset button clicked!");
       if (!confirm("script_user.pyを初期状態に戻しますか？")) {
         return;
       }
+      
       statusEl.textContent = "リセット中...";
+      
       try {
         const res = await fetch("/reset_script", {
           method: "POST",
         });
-        if (!res.ok) {
-          statusEl.textContent = "エラー: " + res.status + " " + res.statusText;
-          return;
+        console.log("Reset response status:", res.status);
+        
+        if (res.ok) {
+          const data = await res.json();
+          statusEl.textContent = data.message || "script_user.py を初期状態に戻しました。";
+          promptEl.value = "";
+          console.log("Reset successful:", data);
+        } else {
+          statusEl.textContent = "リセットエラー: " + res.status;
         }
-        const json = await res.json();
-        statusEl.textContent = json.message || "スクリプトを初期状態に戻しました。";
-        promptEl.value = "";
       } catch (e) {
-        statusEl.textContent = "通信エラー: " + e;
+        statusEl.textContent = "通信エラー: " + e.message;
+        console.error("Reset error:", e);
       }
     };
+    
+    console.log("Event listeners attached successfully!");
   </script>
 </body>
 </html>
@@ -149,46 +278,76 @@ async def update_script(body: PromptBody):
             print("=== プロンプト挿入成功（末尾追加方式） ===")
 
         # 2. OpenAI API呼び出し（ChatGPT からコード生成）
-        # 環境変数から API キーを取得（必要に応じて設定）
         openai.api_key = os.getenv("OPENAI_API_KEY")
         
         print(f"=== OpenAI APIリクエスト送信 ===")
         print(f"User prompt: {body.prompt}")
         
         resp = openai.chat.completions.create(
-            model="gpt-5.1",  # モデル名は正常
+            model="gpt-5.1",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": body.prompt},
             ],
-            #temperature使えないはず
         )
         print(f"=== OpenAI APIレスポンス受信 ===")
         print(resp)
-        # レスポンスからJSONをパース
+
         import json
 
         response_content = resp.choices[0].message.content
         
-        # JSON部分を抽出（```json ... ``` でラップされている場合に対応）
-        if "```json" in response_content:
-            json_start = response_content.find("```json") + 7
-            json_end = response_content.find("```", json_start)
-            json_str = response_content[json_start:json_end].strip()
-        elif "```" in response_content:
-            json_start = response_content.find("```") + 3
-            json_end = response_content.find("```", json_start)
-            json_str = response_content[json_start:json_end].strip()
-        else:
-            json_str = response_content.strip()
-        
-        result = json.loads(json_str)
-        code = result.get("script_user", "")
-        comment = result.get("comment", "")
+        # デバッグ: レスポンス全体をログに出力
+        print(f"=== Full Response Content (length: {len(response_content)}) ===")
+        print(response_content[:500])  # 最初の500文字
+        print("...")
+        print(response_content[-500:])  # 最後の500文字
 
-        # 3. script_user.py を上書き保存
-        with open("scripts/script_user.py", "w", encoding="utf-8") as f:
-            f.write(code)
+        # まずはモデル出力に COMMENT/CODE トークンが含まれているか確認する
+        comment = ""
+        code = ""
+        if COMMENT_START_TOKEN in response_content or CODE_START_TOKEN in response_content:
+            # COMMENT と CODE をそれぞれ抜き出す(見つからなければ空文字)
+            comment = extract_comment_block(response_content)
+            code = extract_code_block(response_content)
+            print(f"=== Token-based extraction ===")
+            print(f"Comment length: {len(comment)}")
+            print(f"Code length: {len(code)}")
+            print(f"Code preview (first 200 chars): {code[:200] if code else '(empty)'}")
+        else:
+            # 既存の JSON パース方式を試す
+            try:
+                # JSON部分を抽出（```json ... ``` でラップされている場合に対応）
+                if "```json" in response_content:
+                    json_start = response_content.find("```json") + 7
+                    json_end = response_content.find("```", json_start)
+                    json_str = response_content[json_start:json_end].strip()
+                elif "```" in response_content:
+                    json_start = response_content.find("```") + 3
+                    json_end = response_content.find("```", json_start)
+                    json_str = response_content[json_start:json_end].strip()
+                else:
+                    json_str = response_content.strip()
+
+                result = json.loads(json_str)
+                code = result.get("script_user", "")
+                comment = result.get("comment", "")
+            except Exception as ex:
+                # JSONパースに失敗したら、念のため COMMENT/CODE を再試行
+                print(f"JSON parse failed: {ex}. Falling back to token extraction.")
+                comment = extract_comment_block(response_content)
+                code = extract_code_block(response_content)
+
+        # 3. script_user.py を上書き保存(コードが空でない場合のみ)
+        if code:
+            try:
+                with open("scripts/script_user.py", "w", encoding="utf-8") as f:
+                    f.write(code)
+                print(f"=== script_user.py updated successfully ({len(code)} chars) ===")
+            except Exception as e:
+                print(f"script write failed: {e}")
+        else:
+            print("=== WARNING: No code extracted, script_user.py NOT updated ===")
 
         # 4. 「リロードフラグ」を立てる
         with open("reload.flag", "w", encoding="utf-8") as f:
@@ -205,6 +364,129 @@ async def update_script(body: PromptBody):
             "status": "error",
             "error": str(e)
         }
+
+
+@app.post("/update_script_stream")
+async def update_script_stream(body: PromptBody):
+    """
+    OpenAI からの出力をストリームでそのままクライアントに流しつつ、
+    最後に CODE 部分だけ script_user.py に保存する。
+    """
+    try:
+        # 1. プロンプトを組み立て
+        system_prompt = load_system_prompt()
+
+        if "{ユーザーの自然言語プロンプトをここに挿入}" in system_prompt:
+            system_prompt = system_prompt.replace(
+                "{ユーザーの自然言語プロンプトをここに挿入}",
+                body.prompt
+            )
+        else:
+            system_prompt += f"\n\n## ユーザーからの要望\n\n{body.prompt}"
+
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+
+        def event_stream():
+            full_text = ""
+            comment_extracted = False
+            buffer = ""  # チャンクをまとめるバッファ
+            try:
+                print("=== OpenAI API (stream) リクエスト送信 ===")
+                stream = openai.chat.completions.create(
+                    model="gpt-5.1",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": body.prompt},
+                    ],
+                    stream=True,  # ストリーミング有効化
+                )
+                for chunk in stream:
+                    delta = chunk.choices[0].delta
+                    content = getattr(delta, "content", None) or ""
+                    if not content:
+                        continue
+                    
+                    buffer += content
+                    full_text += content
+                    
+                    # バッファが一定サイズになったら、または特定のトークンが現れたら送信
+                    should_yield = (
+                        len(buffer) >= 50 or  # 50文字以上溜まったら
+                        COMMENT_END_TOKEN in buffer or  # コメント終了トークンが出現したら
+                        CODE_START_TOKEN in buffer  # コード開始トークンが出現したら
+                    )
+                    
+                    if should_yield:
+                        print(f"=== Yielding buffer ({len(buffer)} chars): {buffer[:100]}... ===")
+                        yield buffer
+                        buffer = ""  # バッファをクリア
+                    
+                    # コメント部分が完成したらログに出力(デバッグ用)
+                    if not comment_extracted and COMMENT_END_TOKEN in full_text:
+                        comment = extract_comment_block(full_text)
+                        if comment:
+                            print(f"=== Comment extracted early: {comment[:100]}... ===")
+                            comment_extracted = True
+                            # ゲームUIに「コード生成中」を表示するためのフラグファイル作成
+                            try:
+                                with open("status_generating.flag", "w", encoding="utf-8") as f:
+                                    f.write("コード生成中...")
+                                print("=== status_generating.flag created ===")
+                            except Exception as e:
+                                print(f"Failed to create status flag: {e}")
+
+                # 残りのバッファを送信
+                if buffer:
+                    print(f"=== Yielding final buffer ({len(buffer)} chars) ===")
+                    yield buffer
+
+                # 全チャンク受信後、CODE ブロックだけ抜き出して保存
+                print(f"=== Stream complete, extracting code (total length: {len(full_text)}) ===")
+                code = extract_code_block(full_text)
+                if code:
+                    with open("scripts/script_user.py", "w", encoding="utf-8") as f:
+                        f.write(code)
+                    with open("reload.flag", "w", encoding="utf-8") as f:
+                        f.write("")
+                    print(f"=== script_user.py を更新しました（stream, {len(code)} chars） ===")
+                    
+                    # 生成中フラグを削除
+                    if os.path.exists("status_generating.flag"):
+                        os.remove("status_generating.flag")
+                    
+                    # ゲームUIにユーザープロンプトを表示するためのファイル作成
+                    try:
+                        prompt_preview = body.prompt[:30] + "..." if len(body.prompt) > 30 else body.prompt
+                        with open("status_prompt.flag", "w", encoding="utf-8") as f:
+                            f.write(f"適用: {prompt_preview}")
+                        print(f"=== status_prompt.flag created with: {prompt_preview} ===")
+                    except Exception as e:
+                        print(f"Failed to create prompt flag: {e}")
+                else:
+                    print("警告: CODE ブロックが出力に見つかりませんでした")
+                    print(f"Full text preview: {full_text[:500]}")
+
+            except Exception as e:
+                err = f"\n[SERVER ERROR] {e}"
+                print(err)
+                yield err
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/plain; charset=utf-8",
+        )
+
+    except Exception as e:
+        def error_stream():
+            msg = f"[SERVER ERROR (outer)]: {e}"
+            print(msg)
+            yield msg
+        return StreamingResponse(
+            error_stream(),
+            media_type="text/plain; charset=utf-8",
+            status_code=500,
+        )
+
 
 @app.post("/reset_script")
 async def reset_script():
@@ -242,13 +524,47 @@ async def reset_script():
             "message": f"リセット中にエラーが発生しました: {str(e)}"
         }
 
-@app.get("/")
+
+@app.get("/info")
 async def root():
     return {"message": "ゲームスクリプト更新サーバー稼働中"}
+
 
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@app.get("/test_cors")
+async def test_cors():
+    """CORSテスト用エンドポイント"""
+    return {"message": "CORS is working!", "timestamp": "2025-01-21"}
+
+
+class StatusBody(BaseModel):
+    text: str
+    duration: int = 180  # デフォルト3秒（60fps想定）
+
+
+@app.post("/set_status")
+async def set_status(body: StatusBody):
+    """
+    ゲームの右上にテキストを表示する
+    """
+    try:
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect(("localhost", 50000))
+            command = {
+                "action": "display_text",
+                "text": body.text,
+                "duration": body.duration
+            }
+            s.sendall(json.dumps(command).encode('utf-8'))
+        return {"status": "ok", "text": body.text}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
 
 if __name__ == "__main__":
     # 環境変数チェック
@@ -261,7 +577,7 @@ if __name__ == "__main__":
         from pyngrok import ngrok
         
         # ngrok トンネルを開く
-        public_url = ngrok.connect(8000, bind_tls=True)
+        public_url = ngrok.connect(8001, bind_tls=True)
         print(f"\n{'='*60}")
         print(f"✓ ngrok トンネル作成完了")
         print(f"{'='*60}")
@@ -273,4 +589,4 @@ if __name__ == "__main__":
         print(f"⚠ ngrok の初期化に失敗しました: {e}")
         print("ngrok なしでサーバーを起動します\n")
     
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

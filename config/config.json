@@ -56,7 +56,7 @@
       "width": 40,
       "height": 40,
       "scale": 1.0,
-      "use_gravity": false,
+      "use_gravity": true,
       "y_offset": 127
     },
     {
@@ -66,7 +66,7 @@
       "width": 40,
       "height": 40,
       "scale": 1.0,
-      "use_gravity": false
+      "use_gravity": true
     },
     {
       "world_x": 1941,
@@ -77,6 +77,15 @@
       "scale": 1.0,
       "use_gravity": false,
       "y_offset": 112
+    },
+    {
+      "world_x": 2461,
+      "y_offset": 127,
+      "move_range": 100,
+      "speed": 2,
+      "width": 40,
+      "height": 40,
+      "use_gravity": true
     }
   ],
   "platforms": [
@@ -101,14 +110,9 @@
       "width": 120
     },
     {
-      "world_x": 2289,
-      "y_offset": 148,
-      "width": 120
-    },
-    {
-      "world_x": 2484,
-      "y_offset": 87,
-      "width": 140
+      "world_x": 2340,
+      "y_offset": 120,
+      "width": 260
     },
     {
       "world_x": 2720,

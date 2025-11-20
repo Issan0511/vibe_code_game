@@ -51,7 +51,7 @@ def on_init(state, api):
             "width": 40,           # 敵の幅
             "height": 40,          # 敵の高さ
             "scale": 1,            # 表示スケール
-            "use_gravity": False,  # 重力を使うか（False = 空中に浮く）
+            "use_gravity": True,  # 重力を使うか（False = 空中に浮く）
             "y_offset": 127        # 地面からの高さ
             },
             # 敵 2: 中間の高さにいる敵
