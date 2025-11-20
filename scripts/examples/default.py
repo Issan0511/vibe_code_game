@@ -16,14 +16,15 @@ def on_tick(state, api):
     # py = state["player"]["y"]
     # now = state["world"]["time_ms"]
 
-    # # ---------- ゴールに仕掛けるトラップの処理 ----------
-    # api.goal_move_on_approach()
-    # # ---------- プレイヤーに追従する敵の処理 ----------
-    # api.enemy_chase_and_jump()
-    # # ---------- 一定間隔で敵が出現する処理 ----------
-    # api.spawn_enemy_periodically()
-    # # ---------- 足場が動く処理 ----------
-    # api.platform_oscillate()
+    # # ---------- ゴールに仕掛けるトラップの処理 (明示的な引数) ----------
+    # api.goal_move_on_approach(state, memory, approach_distance=50, move_dy=-200, spawn_enemy_at_goal=True)
+    # # ---------- プレイヤーに追従する敵の処理 (明示的な引数) ----------
+    # api.enemy_chase_and_jump(state, memory, chase_distance=150, jump_chance=0.01, jump_cooldown_ms=500)
+    # # ---------- 一定間隔で敵が出現する処理 (明示的にデフォルトを指定) ----------
+    # api.spawn_enemy_periodically(state, memory, interval_ms=1000, spawn_chance=0.5, offset_x=400)
+    # # ---------- 足場が動く処理 (明示的にデフォルトを指定) ----------
+    # api.platform_oscillate(memory, platform_indices=[0, 1], speeds=[(0, -1), (0, 1)], move_range=80)
+
     pass
 
     

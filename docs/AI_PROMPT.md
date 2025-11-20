@@ -41,9 +41,11 @@ if api.rand() < 0.5:  # 50%の確率
 
 #### `api.set_gravity(g)`
 重力加速度を設定します（-5.0 〜 5.0）。
+内部的には `config['physics']['gravity']` を変更します。
 
 #### `api.set_max_speed(v)`
 プレイヤーの最大移動速度を設定します（0.5 〜 30.0）。
+内部的には `config['physics']['max_speed']` を変更します。
 
 ---
 
@@ -51,6 +53,7 @@ if api.rand() < 0.5:  # 50%の確率
 
 #### `api.set_config(key, value)`
 ゲームの設定値を動的に変更します。
+`set_gravity` などの専用メソッドがない項目も、このメソッドで変更可能です。
 
 **使用例:**
 ```python

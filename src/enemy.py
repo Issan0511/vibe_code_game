@@ -28,15 +28,22 @@ class Enemy:
         self.vy = 0  # y方向の速度
         self.use_api_control = False  # APIからの制御を使うかどうか
         
-        # 画像読み込み
+        # Load images
+        self.images = []
         try:
-            self.image = pygame.image.load('assets/enemy.png').convert_alpha()
-            # 画像を1.2倍にスケール
-            self.image = pygame.transform.scale(self.image, (int(self.width * 1.2), int(self.height * 1.2)))
+            for i in range(1, 5):
+                img = pygame.image.load(f'assets/enemy/{i}.png').convert_alpha()
+                img = pygame.transform.scale(img, (int(self.width * 1.2), int(self.height * 1.2)))
+                self.images.append(img)
             self.use_image = True
-        except:
-            self.image = None
+        except Exception as e:
+            print(f"Failed to load enemy images: {e}")
             self.use_image = False
+
+        # Animation state
+        self.animation_timer = 0
+        self.current_frame_index = 0
+        self.ANIMATION_SPEED = 6  # 24 frames / 4 images = 6 frames per image
 
     def move_patrol(self):
         """左右に往復運動"""
@@ -98,19 +105,30 @@ class Enemy:
         # world_x を camera_x でずらして画面上の位置に変換
         screen_x = int(self.world_x - camera_x)
         
-        if self.use_image and self.image:
+        if self.use_image and self.images:
+            # Update animation
+            self.animation_timer += 1
+            if self.animation_timer >= self.ANIMATION_SPEED:
+                self.animation_timer = 0
+                self.current_frame_index = (self.current_frame_index + 1) % len(self.images)
+            
+            current_img = self.images[self.current_frame_index]
+
             # 画像を描画
-            image_width = int(self.width * 1.2)
-            image_height = int(self.height * 1.2)
+            image_width = current_img.get_width()
+            image_height = current_img.get_height()
             image_x = screen_x - image_width // 2
             image_y = self.y - image_height  # 足元を基準に
             
-            # 向きに応じて反転（デフォルトは左向き、direction=1で右向き）
+            # 向きに応じて反転
+            # 画像は左向き(direction=-1)がデフォルト
             if self.direction == 1:
-                flipped_image = pygame.transform.flip(self.image, True, False)
+                # 右向きに移動中 -> 反転して右を向かせる
+                flipped_image = pygame.transform.flip(current_img, True, False)
                 surface.blit(flipped_image, (image_x, image_y))
             else:
-                surface.blit(self.image, (image_x, image_y))
+                # 左向きに移動中 -> そのまま描画
+                surface.blit(current_img, (image_x, image_y))
         else:
             # フォールバック: 矩形描画
             rect = pygame.Rect(screen_x - self.width // 2,

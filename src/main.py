@@ -26,17 +26,18 @@ FPS = config['screen']['fps']
 PLAYER_X = config['player']['x']
 GROUND_Y = SCREEN_HEIGHT - config['ground']['y_offset']
 
-BG_SCROLL_SPEED = config['physics']['bg_scroll_speed']
-ACCELERATION = config['physics']['acceleration']
-DECELERATION = config['physics']['deceleration']
-MAX_SPEED = config['physics']['max_speed']
+# 物理パラメータは config から直接読むため、ここでの変数展開は削除
+# BG_SCROLL_SPEED = config['physics']['bg_scroll_speed']
+# ACCELERATION = config['physics']['acceleration']
+# DECELERATION = config['physics']['deceleration']
+# MAX_SPEED = config['physics']['max_speed']
 
 # =========================
 # 初期化
 # =========================
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("横スクロールゲーム（背景スクロール）")
+pygame.display.set_caption("Side-scrolling Game (Parallax Background)")
 clock = pygame.time.Clock()
 
 font = pygame.font.SysFont(None, 24)
@@ -54,7 +55,7 @@ except:
 # =========================
 # プレイヤー
 # =========================
-GRAVITY = config['physics']['gravity']
+# GRAVITY = config['physics']['gravity']  # 削除
 player = Player(PLAYER_X, GROUND_Y, config)
 
 # ゲーム状態
@@ -100,10 +101,10 @@ def make_state():
         "world": {
             "time_ms": pygame.time.get_ticks(),
             "camera_x": camera_x,
-            "gravity": GRAVITY,
+            "gravity": config['physics']['gravity'],
         },
         "enemies": [
-            {"id": e.id, "x": e.world_x, "y": e.y}
+            {"id": e.id, "x": e.world_x, "y": e.y, "use_gravity": e.use_gravity}
             for e in enemies
         ],
         "goal": {"x": goal.world_x, "y": goal.y},
@@ -198,17 +199,19 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 def apply_command(cmd):
-    global GRAVITY, MAX_SPEED, config
+    global config
 
     op = cmd.get("op")
 
+    # set_param は set_config に統合されたため削除（互換性のため残す場合は set_config へ転送）
     if op == "set_param":
+        # custom_runner 側で set_config に変換しているはずだが、念のため
         key = cmd.get("key")
         val = cmd.get("value")
         if key == "gravity":
-            GRAVITY = clamp(float(val), -5.0, 5.0)
+            config['physics']['gravity'] = clamp(float(val), -5.0, 5.0)
         elif key == "max_speed":
-            MAX_SPEED = clamp(float(val), 0.5, 30.0)
+            config['physics']['max_speed'] = clamp(float(val), 0.5, 30.0)
 
     elif op == "set_config":
         key = cmd.get("key", "")
@@ -311,6 +314,17 @@ def apply_command(cmd):
         idx = int(cmd.get("index", -1))
         if 0 <= idx < len(platforms):
             platforms[idx].stop()
+    elif op == "runner_log":
+        # custom_runner からのログを表示
+        msg = cmd.get("msg", "")
+        print(f"[runner] {msg}")
+    elif op == "runner_error":
+        # custom_runner 側で発生した例外を表示（トレースバック含む）
+        msg = cmd.get("msg", "")
+        trace = cmd.get("trace", "")
+        print(f"[runner ERROR] {msg}")
+        if trace:
+            print(trace)
 
 # =========================
 # TCP接続を初期化
@@ -414,6 +428,8 @@ while running:
         # =========================
         # プレイヤーの物理演算（ジャンプ）
         # =========================
+        # 敵と同様に、現在の GRAVITY を渡してランタイムで変更された値に追従させる
+        previous_y = player.y
         player.update()
 
         # 段差との判定
@@ -422,11 +438,24 @@ while running:
         
         for i, platform in enumerate(platforms):
             platform_rect = platform.get_rect(camera_x)
-            if player_rect.colliderect(platform_rect):
-                # 上から乗った場合
-                if player.vy > 0 and player_rect.bottom <= platform_rect.top + 10:
-                    player.land_on(platform_rect.top)
-                    player_on_platform = i
+            
+            # X軸の重なり判定
+            if player_rect.right > platform_rect.left and player_rect.left < platform_rect.right:
+                # Y軸の通過判定（すり抜け対策）
+                # 前フレームで足場より上にいて、現フレームで足場以上（または通過）の位置にいる
+                player_bottom = player.y + player.height
+                previous_bottom = previous_y + player.height
+                platform_top = platform_rect.top
+                
+                # 落下中 かつ 足場をまたいでいる場合
+                if player.vy > 0:
+                    # previous_bottom <= platform_top + 10 は、わずかなめり込みや誤差を許容するためのマージン
+                    if previous_bottom <= platform_top + 10 and player_bottom >= platform_top:
+                        player.land_on(platform_rect.top)
+                        player_on_platform = i
+                        # 複数の足場を同時に通過する可能性がある場合、最も高い位置（最初に見つかった有効な足場）で停止するのが自然
+                        # ここではシンプルに見つかった時点で着地とする
+                        break
         
         # 地面判定（崖でない場所のみ）
         player_world_x = camera_x + player.x_screen
@@ -451,8 +480,9 @@ while running:
         for cmd in custom_conn.poll_commands():
             apply_command(cmd)
 
+        current_gravity = config['physics']['gravity']
         for enemy in enemies:
-            enemy.update(platforms, GROUND_Y, GRAVITY, lambda x: is_on_ground(ground_segments, x))
+            enemy.update(platforms, GROUND_Y, current_gravity, lambda x: is_on_ground(ground_segments, x))
 
         # 画面外に落ちた敵を削除
         enemies[:] = [e for e in enemies if e.y < SCREEN_HEIGHT + 100]
@@ -492,6 +522,11 @@ while running:
         # 崖判定（プレイヤーが地面の範囲外で、足場にも乗っていない場合）
         player_world_x = camera_x + player.x_screen
         if player.y >= GROUND_Y and not is_on_ground(ground_segments, player_world_x) and player_on_platform is None:
+            game_over = True
+
+        # 上方向へ画面外に出たら死亡にする（例: 重力が0のときの無限上昇対策）
+        # プレイヤーの下端が画面上端よりさらに一定量上に行ったらゲームオーバー
+        if player.y + player.height < -100:
             game_over = True
     else:
         # ゲーム終了後、Rキーでリスタート
@@ -558,7 +593,9 @@ while running:
             pygame.draw.rect(screen, tuple(config['ground']['color']), ground_rect, 3)  # 黒枠線(線幅3px)
 
     # プレイヤー（画面上で位置固定）
-    player.draw(screen)
+    # カメラが動いているか、またはキー入力がある場合に「動いている」とみなす
+    is_moving = abs(camera_vx) > 0.1
+    player.draw(screen, is_moving)
 
     # 段差
     for platform in platforms:
@@ -573,17 +610,17 @@ while running:
 
     # 情報表示
     if game_over:
-        info_text = "GAME OVER! Rキーでリスタート"
+        info_text = "GAME OVER! Press R to restart"
         text_surf = font.render(info_text, True, (255, 0, 0))
         text_rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
         screen.blit(text_surf, text_rect)
     elif game_clear:
-        info_text = "GOAL! ゲームクリア! Rキーでリスタート"
+        info_text = "GOAL! You cleared the game! Press R to restart"
         text_surf = font.render(info_text, True, (0, 200, 0))
         text_rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
         screen.blit(text_surf, text_rect)
     else:
-        info_text = f"左右キーで背景スクロール / スペースでジャンプ / Enemies: {len(enemies)}"
+        info_text = f"Use LEFT/RIGHT to scroll / SPACE to jump / Enemies: {len(enemies)}"
         text_surf = font.render(info_text, True, (0, 0, 0))
         screen.blit(text_surf, (10, 10))
 

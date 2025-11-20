@@ -8,11 +8,19 @@
     "x": 200,
     "width": 40,
     "height": 60,
-    "color": [50, 150, 255],
+    "color": [
+      50,
+      150,
+      255
+    ],
     "shoe": {
       "width": 50,
       "height": 15,
-      "color": [139, 69, 19]
+      "color": [
+        139,
+        69,
+        19
+      ]
     }
   },
   "physics": {
@@ -25,15 +33,23 @@
   },
   "ground": {
     "y_offset": 80,
-    "color": [0, 0, 0]
+    "color": [
+      0,
+      0,
+      0
+    ]
   },
   "background": {
-    "color": [135, 206, 235],
+    "color": [
+      135,
+      206,
+      235
+    ],
     "tile_width": 800
   },
   "enemies": [
     {
-      "world_x": 400,
+      "world_x": 409,
       "move_range": 80,
       "speed": 2,
       "width": 40,
@@ -41,20 +57,20 @@
       "use_gravity": true
     },
     {
-      "world_x": 800,
-      "move_range": 120,
-      "speed": 3,
-      "width": 40,
-      "height": 40,
-      "use_gravity": true
-    },
-    {
-      "world_x": 1200,
+      "world_x": 1065,
       "move_range": 60,
       "speed": 1.5,
       "width": 40,
       "height": 40,
       "use_gravity": false
+    },
+    {
+      "world_x": 1822,
+      "move_range": 100,
+      "speed": 2,
+      "width": 40,
+      "height": 40,
+      "use_gravity": true
     }
   ],
   "platforms": [
@@ -64,19 +80,34 @@
       "width": 150
     },
     {
-      "world_x": 600,
+      "world_x": 698,
       "y_offset": 150,
       "width": 120
-    },
-    {
-      "world_x": 900,
-      "y_offset": 150,
-      "width": 180
     },
     {
       "world_x": 1300,
       "y_offset": 120,
       "width": 150
+    },
+    {
+      "world_x": 2098,
+      "y_offset": 84,
+      "width": 120
+    },
+    {
+      "world_x": 2289,
+      "y_offset": 148,
+      "width": 120
+    },
+    {
+      "world_x": 2484,
+      "y_offset": 87,
+      "width": 140
+    },
+    {
+      "world_x": 2720,
+      "y_offset": 40,
+      "width": 160
     }
   ],
   "goal": {
@@ -84,7 +115,11 @@
     "world_y": 0,
     "width": 60,
     "height": 80,
-    "color": [255, 215, 0]
+    "color": [
+      255,
+      215,
+      0
+    ]
   },
   "ground_segments": [
     {
@@ -92,12 +127,16 @@
       "end_x": 600
     },
     {
-      "start_x": 850,
-      "end_x": 1000
+      "start_x": 942,
+      "end_x": 1202
     },
     {
-      "start_x": 1400,
-      "end_x": 5000
+      "start_x": 1620,
+      "end_x": 2040
+    },
+    {
+      "start_x": 2920,
+      "end_x": 3140
     }
   ]
 }

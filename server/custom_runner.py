@@ -5,6 +5,7 @@ import sys
 import random
 import importlib
 import os
+import traceback
 
 # プロジェクトルートをパスに追加
 project_root = os.path.dirname(os.path.dirname(__file__))
@@ -43,18 +44,12 @@ class RemoteAPI:
 
     # ---- パラメータ変更系 → コマンドに変換 ----
     def set_gravity(self, g):
-        self.commands.append({
-            "op": "set_param",
-            "key": "gravity",
-            "value": g,
-        })
+        # set_param ではなく set_config を使うように変更
+        self.set_config("physics.gravity", g)
 
     def set_max_speed(self, v):
-        self.commands.append({
-            "op": "set_param",
-            "key": "max_speed",
-            "value": v,
-        })
+        # set_param ではなく set_config を使うように変更
+        self.set_config("physics.max_speed", v)
 
     def set_config(self, key, value):
         self.commands.append({
@@ -309,6 +304,12 @@ def main():
     did_init = False
 
     # script_user をリロードして最新のコードを読み込む
+    # ファイルの最終更新時刻を監視し、変更があれば実行時に再読み込みする
+    script_path = os.path.join(project_root, "scripts", "script_user.py")
+    try:
+        last_mtime = os.path.getmtime(script_path)
+    except Exception:
+        last_mtime = 0
     importlib.reload(script_user)
 
     while True:
@@ -324,6 +325,29 @@ def main():
             continue
 
         state = msg["state"]
+
+        # script_user.py がファイル上で更新されていれば再読み込みする
+        try:
+            mtime = os.path.getmtime(script_path)
+            if mtime != last_mtime:
+                last_mtime = mtime
+                try:
+                    importlib.reload(script_user)
+                    # reload 時は on_init を再実行させる
+                    did_init = False
+                    # ゲーム側にログを送る（commands 経由）
+                    try:
+                        log_cmd = {"type": "commands", "commands": [{"op": "runner_log", "msg": "script_user.py changed - reloaded"}]}
+                        f_w.write(json.dumps(log_cmd) + "\n")
+                        f_w.flush()
+                    except Exception:
+                        # ログ送信に失敗しても無視
+                        pass
+                except Exception as e:
+                    print("script_user reload error:", e, file=sys.stderr)
+        except Exception:
+            # ファイルアクセスできない場合は無視
+            pass
         
         # API に現在の state を保持させる
         api._current_state = state
@@ -340,6 +364,13 @@ def main():
                     f_w.write(out + "\n")
                     f_w.flush()
             except Exception as e:
+                # 標準エラー出力に出す代わりに、ゲーム側へエラー内容を送る
+                try:
+                    err = traceback.format_exc()
+                    f_w.write(json.dumps({"type": "commands", "commands": [{"op": "runner_error", "msg": str(e), "trace": err}]}) + "\n")
+                    f_w.flush()
+                except Exception:
+                    pass
                 print("on_init error:", e, file=sys.stderr)
             did_init = True
 
@@ -350,6 +381,13 @@ def main():
             cmds = api.commands[:]
             api.commands.clear()
         except Exception as e:
+            # ゲーム側に例外内容を送る
+            try:
+                err = traceback.format_exc()
+                f_w.write(json.dumps({"type": "commands", "commands": [{"op": "runner_error", "msg": str(e), "trace": err}]}) + "\n")
+                f_w.flush()
+            except Exception:
+                pass
             print("on_tick error:", e, file=sys.stderr)
             cmds = []
 
