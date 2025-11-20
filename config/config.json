@@ -81,8 +81,8 @@
     },
     {
       "world_x": 698,
-      "y_offset": 150,
-      "width": 120
+      "y_offset": 110,
+      "width": 160
     },
     {
       "world_x": 1300,
@@ -121,22 +121,18 @@
       0
     ]
   },
-  "ground_segments": [
+  "cliffs": [
     {
-      "start_x": 0,
-      "end_x": 600
+      "start_x": 590,
+      "end_x": 905
     },
     {
-      "start_x": 942,
-      "end_x": 1202
+      "start_x": 1237,
+      "end_x": 1653
     },
     {
-      "start_x": 1620,
-      "end_x": 2040
-    },
-    {
-      "start_x": 2920,
-      "end_x": 3140
+      "start_x": 2041,
+      "end_x": 2919
     }
   ]
 }

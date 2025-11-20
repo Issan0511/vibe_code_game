@@ -33,7 +33,7 @@ class LevelEditor:
         self.camera_x = 0
         self.scroll_speed = 10
         
-        self.mode = "select" # select, platform, enemy, ground, goal
+        self.mode = "select" # select, platform, enemy, cliff, goal
         self.selected_object = None
         self.drag_start = None
         self.dragging = False
@@ -53,7 +53,8 @@ class LevelEditor:
         # データをソートして保存（見やすさのため）
         self.config['platforms'].sort(key=lambda x: x['world_x'])
         self.config['enemies'].sort(key=lambda x: x['world_x'])
-        self.config['ground_segments'].sort(key=lambda x: x['start_x'])
+        self.config.setdefault('cliffs', [])
+        self.config['cliffs'].sort(key=lambda x: x['start_x'])
         
         with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
             json.dump(self.config, f, indent=2, ensure_ascii=False)
@@ -100,7 +101,7 @@ class LevelEditor:
                     self.mode = "enemy"
                     self.selected_object = None
                 elif event.key == pygame.K_3:
-                    self.mode = "ground"
+                    self.mode = "cliff"
                     self.selected_object = None
                 elif event.key == pygame.K_4:
                     self.mode = "goal"
@@ -155,7 +156,7 @@ class LevelEditor:
             self.selected_object = ('enemy', new_enemy)
             self.mode = "select" # 追加後は選択モードへ
             
-        elif self.mode == "ground":
+        elif self.mode == "cliff":
             self.drag_start = (self.snap_to_grid(wx), self.ground_y)
             self.dragging = True
 
@@ -184,7 +185,7 @@ class LevelEditor:
                 # しかし、空中敵も作りたいかもしれない。
                 # いったんxのみ移動
                 pass
-            elif obj_type == 'ground':
+            elif obj_type == 'cliff':
                 obj['start_x'] += dx
                 obj['end_x'] += dx
             elif obj_type == 'goal':
@@ -221,7 +222,7 @@ class LevelEditor:
                 self.selected_object = ('platform', new_plat)
                 self.mode = "select"
                 
-        elif self.mode == "ground" and self.dragging:
+        elif self.mode == "cliff" and self.dragging:
             start_x, _ = self.drag_start
             end_x = self.snap_to_grid(wx)
             
@@ -229,19 +230,19 @@ class LevelEditor:
             x2 = max(start_x, end_x)
             
             if x2 - x1 > 0:
-                new_ground = {
+                new_cliff = {
                     "start_x": x1,
                     "end_x": x2
                 }
-                self.config['ground_segments'].append(new_ground)
-                self.selected_object = ('ground', new_ground)
+                self.config.setdefault('cliffs', []).append(new_cliff)
+                self.selected_object = ('cliff', new_cliff)
                 self.mode = "select"
         
         self.dragging = False
         self.drag_start = None
 
     def select_object(self, wx, wy):
-        # 当たり判定の優先順位: Enemy > Platform > Goal > Ground
+        # 当たり判定の優先順位: Enemy > Platform > Goal > Cliff
         
         # Enemy
         for e in self.config['enemies']:
@@ -273,11 +274,12 @@ class LevelEditor:
             self.selected_object = ('goal', g)
             return
 
-        # Ground
-        for gr in self.config['ground_segments']:
-            if gr['start_x'] <= wx <= gr['end_x'] and \
+        # Cliffs
+        for cl in self.config.get('cliffs', []):
+            if cl['start_x'] <= wx <= cl['end_x'] and \
                self.ground_y <= wy <= self.ground_y + 50: # 地面の下50pxまで判定
-                self.selected_object = ('ground', gr)
+                self.selected_object = ('cliff', cl)
+                return
                 return
         
         self.selected_object = None
@@ -292,8 +294,9 @@ class LevelEditor:
             self.config['platforms'].remove(obj)
         elif obj_type == 'enemy':
             self.config['enemies'].remove(obj)
-        elif obj_type == 'ground':
-            self.config['ground_segments'].remove(obj)
+        elif obj_type == 'cliff':
+            if 'cliffs' in self.config and obj in self.config['cliffs']:
+                self.config['cliffs'].remove(obj)
         
         self.selected_object = None
 
@@ -311,16 +314,22 @@ class LevelEditor:
         gy_screen = self.ground_y
         pygame.draw.line(self.screen, (100, 100, 100), (0, gy_screen), (SCREEN_WIDTH, gy_screen))
 
-        # Ground Segments
-        for gr in self.config['ground_segments']:
-            sx = gr['start_x'] - self.camera_x
-            ex = gr['end_x'] - self.camera_x
+        # Draw full ground
+        ground_rect_full = pygame.Rect(-self.camera_x, gy_screen, SCREEN_WIDTH*10, SCREEN_HEIGHT - gy_screen)
+        pygame.draw.rect(self.screen, COLOR_GROUND, ground_rect_full)
+
+        # Cliffs (holes in the ground)
+        for cl in self.config.get('cliffs', []):
+            sx = cl['start_x'] - self.camera_x
+            ex = cl['end_x'] - self.camera_x
             w = ex - sx
             if w > 0:
                 rect = pygame.Rect(sx, gy_screen, w, SCREEN_HEIGHT - gy_screen)
-                color = COLOR_SELECTED if self.selected_object and self.selected_object[1] == gr else COLOR_GROUND
-                pygame.draw.rect(self.screen, color, rect)
-                pygame.draw.rect(self.screen, (0,0,0), rect, 2)
+                # Draw background color to show the hole
+                pygame.draw.rect(self.screen, COLOR_BG, rect)
+                # Draw border
+                color = COLOR_SELECTED if self.selected_object and self.selected_object[1] == cl else (200, 50, 50)
+                pygame.draw.rect(self.screen, color, rect, 2)
 
         # Platforms
         for p in self.config['platforms']:
@@ -365,7 +374,7 @@ class LevelEditor:
                 h = abs(wy - sy)
                 pygame.draw.rect(self.screen, (200, 200, 200), (x, y, w, h), 2)
                 
-            elif self.mode == "ground":
+            elif self.mode == "cliff":
                 x = min(sx, wx) - self.camera_x
                 w = abs(wx - sx)
                 pygame.draw.rect(self.screen, (100, 255, 100), (x, gy_screen, w, 50), 2)
@@ -374,7 +383,7 @@ class LevelEditor:
         self.draw_ui()
 
     def draw_ui(self):
-        mode_text = f"Mode: {self.mode.upper()} (1:Plat, 2:Enemy, 3:Ground, 4:Goal, ESC:Select, DEL:Delete, Ctrl+S:Save)"
+        mode_text = f"Mode: {self.mode.upper()} (1:Plat, 2:Enemy, 3:Cliff, 4:Goal, ESC:Select, DEL:Delete, Ctrl+S:Save)"
         surf = self.font.render(mode_text, True, COLOR_TEXT)
         pygame.draw.rect(self.screen, (255, 255, 255), (0, 0, SCREEN_WIDTH, 30))
         self.screen.blit(surf, (10, 5))

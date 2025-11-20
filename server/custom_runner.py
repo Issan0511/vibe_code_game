@@ -96,6 +96,15 @@ class RemoteAPI:
             "y": y,
         })
 
+    def show_text(self, text, duration=3.0, color=(255, 255, 255)):
+        """画面右上にテキストを表示する"""
+        self.commands.append({
+            "op": "show_text",
+            "text": str(text),
+            "duration": float(duration),
+            "color": list(color)
+        })
+
     def spawn_snake(self, x, y, width=60, height=20, speed=3, move_range=150):
         """重力を受けない蛇タイプの敵を生成"""
         self.commands.append({
@@ -335,9 +344,12 @@ def main():
                     importlib.reload(script_user)
                     # reload 時は on_init を再実行させる
                     did_init = False
-                    # ゲーム側にログを送る（commands 経由）
+                    # ゲーム側にスクリプト更新通知を送る
                     try:
-                        log_cmd = {"type": "commands", "commands": [{"op": "runner_log", "msg": "script_user.py changed - reloaded"}]}
+                        log_cmd = {"type": "commands", "commands": [
+                            {"op": "show_text", "text": "✓ Updated", "duration": 5.0, "color": [0, 200, 0]},
+                            {"op": "runner_log", "msg": "script_user.py changed - reloaded"}
+                        ]}
                         f_w.write(json.dumps(log_cmd) + "\n")
                         f_w.flush()
                     except Exception:
@@ -345,6 +357,15 @@ def main():
                         pass
                 except Exception as e:
                     print("script_user reload error:", e, file=sys.stderr)
+                    # エラーを画面に表示（シンプルに）
+                    try:
+                        err_cmd = {"type": "commands", "commands": [
+                            {"op": "show_text", "text": "⚠ Error", "duration": 3.0, "color": [255, 0, 0]}
+                        ]}
+                        f_w.write(json.dumps(err_cmd) + "\n")
+                        f_w.flush()
+                    except Exception:
+                        pass
         except Exception:
             # ファイルアクセスできない場合は無視
             pass
@@ -367,7 +388,10 @@ def main():
                 # 標準エラー出力に出す代わりに、ゲーム側へエラー内容を送る
                 try:
                     err = traceback.format_exc()
-                    f_w.write(json.dumps({"type": "commands", "commands": [{"op": "runner_error", "msg": str(e), "trace": err}]}) + "\n")
+                    f_w.write(json.dumps({"type": "commands", "commands": [
+                        {"op": "show_text", "text": "⚠ Error", "duration": 3.0, "color": [255, 0, 0]},
+                        {"op": "runner_error", "msg": str(e), "trace": err}
+                    ]}) + "\n")
                     f_w.flush()
                 except Exception:
                     pass
@@ -384,7 +408,10 @@ def main():
             # ゲーム側に例外内容を送る
             try:
                 err = traceback.format_exc()
-                f_w.write(json.dumps({"type": "commands", "commands": [{"op": "runner_error", "msg": str(e), "trace": err}]}) + "\n")
+                f_w.write(json.dumps({"type": "commands", "commands": [
+                    {"op": "show_text", "text": "⚠ Error", "duration": 3.0, "color": [255, 0, 0]},
+                    {"op": "runner_error", "msg": str(e), "trace": err}
+                ]}) + "\n")
                 f_w.flush()
             except Exception:
                 pass

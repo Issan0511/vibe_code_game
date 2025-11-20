@@ -40,7 +40,14 @@ screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Side-scrolling Game (Parallax Background)")
 clock = pygame.time.Clock()
 
-font = pygame.font.SysFont(None, 24)
+# 日本語フォントの設定
+font_path = "C:/Windows/Fonts/msgothic.ttc"
+if os.path.exists(font_path):
+    font = pygame.font.Font(font_path, 16)
+    large_font = pygame.font.Font(font_path, 20)  # さらに小さく
+else:
+    font = pygame.font.SysFont("meiryo", 16)
+    large_font = pygame.font.SysFont("meiryo", 20)
 
 # 背景画像の読み込み
 try:
@@ -61,6 +68,11 @@ player = Player(PLAYER_X, GROUND_Y, config)
 # ゲーム状態
 game_over = False
 game_clear = False
+
+# テキスト表示用
+display_text = None
+display_text_timer = 0
+display_text_color = (255, 255, 255)
 
 # =========================
 # 背景（単色＋地面を自前描画）
@@ -84,7 +96,8 @@ enemies = [
 # =========================
 # レベル（足場・地面・ゴール）をロード
 # =========================
-platforms, ground_segments, goal = load_level(config, GROUND_Y)
+platforms, goal = load_level(config, GROUND_Y)
+cliffs = config.get('cliffs', [])
 
 # =========================
 # 状態スナップショット関数
@@ -199,7 +212,7 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 def apply_command(cmd):
-    global config
+    global config, display_text, display_text_timer, display_text_color
 
     op = cmd.get("op")
 
@@ -314,6 +327,16 @@ def apply_command(cmd):
         idx = int(cmd.get("index", -1))
         if 0 <= idx < len(platforms):
             platforms[idx].stop()
+
+    elif op == "show_text":
+        text = cmd.get("text", "")
+        duration = float(cmd.get("duration", 3.0))
+        color = cmd.get("color", [255, 255, 255])
+        
+        display_text = text
+        display_text_timer = int(duration * FPS)
+        display_text_color = tuple(color)
+
     elif op == "runner_log":
         # custom_runner からのログを表示
         msg = cmd.get("msg", "")
@@ -460,7 +483,7 @@ while running:
         # 地面判定（崖でない場所のみ）
         player_world_x = camera_x + player.x_screen
         if player.y >= GROUND_Y - player.height and player.vy > 0:
-            if is_on_ground(ground_segments, player_world_x):
+            if is_on_ground(player_world_x, cliffs):
                 # 地面がある場所に着地
                 player.land_on(GROUND_Y)
             # 地面がない場所（崖）では着地しない
@@ -482,7 +505,7 @@ while running:
 
         current_gravity = config['physics']['gravity']
         for enemy in enemies:
-            enemy.update(platforms, GROUND_Y, current_gravity, lambda x: is_on_ground(ground_segments, x))
+            enemy.update(platforms, GROUND_Y, current_gravity, lambda x: is_on_ground(x, cliffs))
 
         # 画面外に落ちた敵を削除
         enemies[:] = [e for e in enemies if e.y < SCREEN_HEIGHT + 100]
@@ -521,7 +544,7 @@ while running:
 
         # 崖判定（プレイヤーが地面の範囲外で、足場にも乗っていない場合）
         player_world_x = camera_x + player.x_screen
-        if player.y >= GROUND_Y and not is_on_ground(ground_segments, player_world_x) and player_on_platform is None:
+        if player.y >= GROUND_Y and not is_on_ground(player_world_x, cliffs) and player_on_platform is None:
             game_over = True
 
         # 上方向へ画面外に出たら死亡にする（例: 重力が0のときの無限上昇対策）
@@ -576,21 +599,51 @@ while running:
         # 背景画像が読み込めない場合は単色
         screen.fill(tuple(config['background']['color']))
 
-    # 地面（セグメントごとに描画）
-    for segment in ground_segments:
-        # 世界座標をスクリーン座標に変換
-        screen_start_x = int(segment['start_x'] - camera_x)
-        screen_end_x = int(segment['end_x'] - camera_x)
+    # 地面（崖以外の部分を描画）
+    # 画面内に見える範囲を計算
+    view_start_x = camera_x
+    view_end_x = camera_x + SCREEN_WIDTH
+    
+    # 現在の描画開始位置
+    current_draw_x = view_start_x
+    
+    # 崖リストをソート（念のため）
+    sorted_cliffs = sorted(cliffs, key=lambda c: c['start_x'])
+    
+    # 画面内の崖を探して、それ以外の部分を描画
+    for cliff in sorted_cliffs:
+        cliff_start = cliff['start_x']
+        cliff_end = cliff['end_x']
         
-        # 画面内に描画する部分のみ計算
-        visible_start_x = max(screen_start_x, 0)
-        visible_end_x = min(screen_end_x, SCREEN_WIDTH)
+        # 崖が現在の描画位置より右にある場合、そこまでを地面として描画
+        if cliff_start > current_draw_x:
+            # 描画範囲の終端（崖の始まり、または画面端）
+            draw_end_x = min(cliff_start, view_end_x)
+            
+            if draw_end_x > current_draw_x:
+                screen_x = int(current_draw_x - camera_x)
+                width = int(draw_end_x - current_draw_x)
+                
+                ground_rect = pygame.Rect(screen_x, GROUND_Y, width, SCREEN_HEIGHT - GROUND_Y)
+                pygame.draw.rect(screen, (255, 255, 255), ground_rect)
+                pygame.draw.rect(screen, tuple(config['ground']['color']), ground_rect, 3)
         
-        if visible_start_x < visible_end_x:
-            ground_width = visible_end_x - visible_start_x
-            ground_rect = pygame.Rect(visible_start_x, GROUND_Y, ground_width, SCREEN_HEIGHT - GROUND_Y)
-            pygame.draw.rect(screen, (255, 255, 255), ground_rect)  # 白で塗りつぶし
-            pygame.draw.rect(screen, tuple(config['ground']['color']), ground_rect, 3)  # 黒枠線(線幅3px)
+        # 現在位置を崖の終わりに進める（ただし、崖が画面より左で終わっている場合は現在位置を変えない）
+        if cliff_end > current_draw_x:
+            current_draw_x = cliff_end
+            
+        # 画面外に出たら終了
+        if current_draw_x >= view_end_x:
+            break
+            
+    # 最後の崖の後ろから画面端までを描画
+    if current_draw_x < view_end_x:
+        screen_x = int(current_draw_x - camera_x)
+        width = int(view_end_x - current_draw_x)
+        
+        ground_rect = pygame.Rect(screen_x, GROUND_Y, width, SCREEN_HEIGHT - GROUND_Y)
+        pygame.draw.rect(screen, (255, 255, 255), ground_rect)
+        pygame.draw.rect(screen, tuple(config['ground']['color']), ground_rect, 3)
 
     # プレイヤー（画面上で位置固定）
     # カメラが動いているか、またはキー入力がある場合に「動いている」とみなす
@@ -623,6 +676,19 @@ while running:
         info_text = f"Use LEFT/RIGHT to scroll / SPACE to jump / Enemies: {len(enemies)}"
         text_surf = font.render(info_text, True, (0, 0, 0))
         screen.blit(text_surf, (10, 10))
+
+    # カスタムテキスト表示（右上） - シンプルな表示
+    if display_text and display_text_timer > 0:
+        # 黒文字、背景なし、枠線なし
+        text_surf = large_font.render(display_text, True, (0, 0, 0)) # 強制的に黒
+
+        text_w, text_h = text_surf.get_size()
+        text_x = SCREEN_WIDTH - text_w - 10
+        text_y = 10
+
+        screen.blit(text_surf, (text_x, text_y))
+
+        display_text_timer -= 1
 
     pygame.display.flip()
 

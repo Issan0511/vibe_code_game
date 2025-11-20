@@ -114,7 +114,7 @@ class Goal:
 
 def load_level(config, ground_y):
     """
-    config から platforms, ground_segments, goal をまとめて生成
+    config から platforms, cliffs, goal をまとめて生成
     """
     PLATFORM_HEIGHT = 20  # 足場の高さ（固定値）
     
@@ -128,7 +128,7 @@ def load_level(config, ground_y):
         for p in config['platforms']
     ]
 
-    ground_segments = config.get('ground_segments', [{"start_x": 0, "end_x": 10000}])
+    # cliffs = config.get('cliffs', [])
 
     goal_initial_y = ground_y + config['goal'].get('world_y', 0)
     goal = Goal(
@@ -139,12 +139,20 @@ def load_level(config, ground_y):
         color=tuple(config['goal']['color'])
     )
 
-    return platforms, ground_segments, goal
+    return platforms, goal
 
 
-def is_on_ground(ground_segments, world_x):
-    """指定された世界座標 x が地面セグメント上かどうか"""
-    for segment in ground_segments:
-        if segment['start_x'] <= world_x <= segment['end_x']:
-            return True
-    return False
+def is_on_ground(world_x, cliffs=None):
+    """指定された世界座標 x が地面上かどうか。
+    
+    cliffs (崖のリスト) に含まれる区間であれば False (地面なし)、
+    そうでなければ True (地面あり) を返す。
+    """
+    if not cliffs:
+        return True
+
+    for cliff in cliffs:
+        if cliff['start_x'] <= world_x <= cliff['end_x']:
+            return False
+    
+    return True
