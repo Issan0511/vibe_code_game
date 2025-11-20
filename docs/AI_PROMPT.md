@@ -368,17 +368,7 @@ def on_tick(state, api):
 }
 ```
 
-### 例3: 実現不可能な要望への対応
 
-**要望:** 「プレイヤーが空を飛べるようにして」
-
-**生成JSON:**
-```json
-{
-  "script_user": "# 来場者がいじるスクリプト\n\nmemory = {}\n\ndef on_init(state, api):\n    # ---- 飛んでいるような感覚にする設定 ----\n    # 重力を弱くしてジャンプを高くする（通常の30%）\n    api.set_gravity(0.3)\n    \n    # 移動速度を1.5倍に上げる\n    original_max_speed = api.get_original_config(\"physics.max_speed\")\n    if original_max_speed:\n        api.set_config(\"physics.max_speed\", original_max_speed * 1.5)\n\ndef on_tick(state, api):\n    pass\n",
-  "comment": "『飛ぶ』機能はAPIにはありませんが、代わりに重力を弱くしてジャンプが高く飛べるようにし、移動速度を1.5倍にしました。空中での移動がスムーズになり、飛んでいるような感覚になります。"
-}
-```
 
 ---
 

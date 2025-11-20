@@ -156,7 +156,7 @@ async def update_script(body: PromptBody):
         print(f"User prompt: {body.prompt}")
         
         resp = openai.chat.completions.create(
-            model="gpt-5.1-codex-mini",  # モデル名は正常
+            model="gpt-5.1",  # モデル名は正常
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": body.prompt},
