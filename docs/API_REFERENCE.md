@@ -1,609 +1,221 @@
-# GameAPI リファレンス
+# Script API リファレンス (簡易版)
 
-`script_user.py` で使用できる GameAPI のメソッド一覧です。
+`script_user.py` で利用できる公開 API 一覧。RemoteAPI 実装と同期済みで、不要・旧仕様は削除済みです。
 
 ## 目次
 
-- [基本機能](#基本機能)
-- [乱数](#乱数)
-- [物理パラメータ](#物理パラメータ)
-- [設定管理](#設定管理)
-- [敵の制御](#敵の制御)
-- [ゴールの制御](#ゴールの制御)
-- [足場の制御](#足場の制御)
-- [視覚効果](#視覚効果)
-- [便利機能（高レベルAPI）](#便利機能高レベルapi)
+1. [乱数 / 基本](#乱数--基本)
+2. [設定操作](#設定操作)
+3. [プレイヤー制御](#プレイヤー制御)
+4. [敵制御](#敵制御)
+5. [ゴール制御](#ゴール制御)
+6. [足場制御](#足場制御)
+7. [背景 / 表示](#背景--表示)
+8. [高レベル API](#高レベル-api)
+9. [デバッグ / ログ](#デバッグ--ログ)
+10. [注意点まとめ](#注意点まとめ)
+11. [使用例](#使用例)
 
 ---
 
-## 基本機能
+## 乱数 / 基本
 
 ### `api.rand()`
 
-0.0 から 1.0 の間のランダムな浮動小数点数を返します。
-
-**戻り値:**
-- `float`: 0.0 ≤ 値 < 1.0
-
-**使用例:**
-```python
-# 50%の確率で処理を実行
-if api.rand() < 0.5:
-    print("当たり！")
-
-# 1%の確率で敵をジャンプさせる
-if api.rand() < 0.01:
-    api.enemy_jump(enemy_id)
-```
+0.0〜1.0 の乱数を返します。
 
 ---
 
-## 乱数
-
-### `api.rand()`
-
-詳細は[基本機能](#基本機能)を参照してください。
-
----
-
-## 物理パラメータ
+## 設定操作
 
 ### `api.set_gravity(g)`
 
-重力加速度を設定します。
-
-**引数:**
-- `g` (float): 重力値（-5.0 〜 5.0）
-  - 正の値: 下向きの重力
-  - 負の値: 上向きの重力
-
-**使用例:**
-```python
-# 通常の重力
-api.set_gravity(1.0)
-
-# 弱い重力（月面のような感じ）
-api.set_gravity(0.3)
-
-# 逆重力
-api.set_gravity(-1.0)
-```
+重力を設定。範囲: -5.0〜5.0。
 
 ### `api.set_max_speed(v)`
 
-プレイヤーの最大移動速度を設定します。
-
-**引数:**
-- `v` (float): 最大速度（0.5 〜 30.0）
-
-**使用例:**
-```python
-# 通常の速度
-api.set_max_speed(8.0)
-
-# 高速移動
-api.set_max_speed(20.0)
-
-# スローモーション
-api.set_max_speed(2.0)
-```
-
----
-
-## 設定管理
+入力加速による最大横速度。範囲: 0.5〜30.0。
 
 ### `api.set_config(key, value)`
 
-ゲームの設定値を動的に変更します。
+単一キーを更新（ドット記法ネスト対応）。例: `api.set_config("player.scale", 2.0)` でプレイヤーサイズ2倍、`api.set_config("enemy.0.scale", 0.5)` で0番目の敵を半分サイズに。
 
-**引数:**
-- `key` (str): 設定のキー（ドット記法でネスト可能）
-- `value`: 設定する値
+### `api.get_config(key)` / `api.get_original_config(key)`
 
-**戻り値:**
-- `bool`: 成功時は `True`、失敗時は `False`
+現在値 / 起動時の元値を取得。
 
-**使用例:**
-```python
-# 物理設定を変更
-api.set_config("physics.gravity", 1.5)
-api.set_config("physics.acceleration", 1.2)
-api.set_config("physics.max_speed", 10.0)
+### `api.update_config(dict_obj)`
 
-# プレイヤーの位置を変更
-api.set_config("player.x", 300)
-api.set_config("player.y", 400)
-```
-
-### `api.get_config(key)`
-
-現在の設定値を取得します。
-
-**引数:**
-- `key` (str): 設定のキー（ドット記法でネスト可能）
-
-**戻り値:**
-- 設定値、存在しない場合は `None`
-
-**使用例:**
-```python
-current_gravity = api.get_config("physics.gravity")
-print(f"現在の重力: {current_gravity}")
-```
-
-### `api.get_original_config(key)`
-
-`config.json` から読み込んだ元の設定値を取得します。
-
-**引数:**
-- `key` (str): 設定のキー（ドット記法でネスト可能）
-
-**戻り値:**
-- 元の設定値、存在しない場合は `None`
-
-**使用例:**
-```python
-# 元の値を取得して2倍にする
-original_speed = api.get_original_config("physics.max_speed")
-if original_speed is not None:
-    api.set_config("physics.max_speed", original_speed * 2)
-```
+ネスト辞書を展開し複数キー更新。
 
 ---
 
-## 敵の制御
+## プレイヤー制御
 
-### `api.spawn_enemy(x, y)`
+### `api.set_player_pos(x=None, y=None)`
 
-指定した座標に敵を出現させます。
+プレイヤーのワールド座標を設定。`x` 指定時はカメラが距離依存速度でスムーズ追従。
 
-**引数:**
-- `x` (float): ワールド座標でのx位置
-- `y` (float): y座標
+### `api.set_player_vel(vx=None, vy=None, limit=False)`
 
-**制限:**
-- 敵の最大数は300まで
+横スクロール速度と垂直速度を直接上書き。`limit=True` の場合のみ `physics.max_speed` を適用。`vy` は安全のため内部で ±60 にクランプ。
 
-**使用例:**
-```python
-# プレイヤーの右側に敵を出現
-px = state["player"]["x"]
-py = state["player"]["y"]
-api.spawn_enemy(x=px + 400, y=py)
+### `api.set_max_jumps(n)`
 
-# ゴールの位置に敵を出現
-goal_pos = api.get_goal_pos()
-if goal_pos:
-    api.spawn_enemy(x=goal_pos["x"], y=goal_pos["y"])
-```
+最大ジャンプ回数 (1〜10)。着地でリセット。
 
-### `api.set_enemy_vel(enemy_id, vx, vy=None)`
+### `api.set_player_scale(scale)`
 
-敵の速度を直接設定します。
+プレイヤー全体の倍率を変更（0.25〜4.0）。足元を基準に拡縮するため、大きくしても地面にめり込まず、当たり判定/画像/靴も同時に調整されます。
 
-**引数:**
-- `enemy_id` (int): 敵のID
-- `vx` (float): x方向の速度（正で右、負で左）
-- `vy` (float, optional): y方向の速度（正で下、負で上）
-  - 省略すると重力に任せる（vyを変更しない）
+---
 
-**制限:**
-- 速度の最大値は 15.0
+## 敵制御
 
-**使用例:**
-```python
-# 敵をプレイヤーに向かって移動させる
-for enemy in state["enemies"]:
-    enemy_id = enemy["id"]
-    dx = state["player"]["x"] - enemy["x"]
-    distance = abs(dx) or 1.0
-    
-    # 正規化して速度を設定
-    vx = 3.0 * (dx / distance)
-    api.set_enemy_vel(enemy_id, vx)  # vyは省略して重力に任せる
+### `api.spawn_enemy(x, y, use_gravity=True, speed=2.0, scale=1.0)`
 
-# 敵を特定方向に飛ばす
-api.set_enemy_vel(enemy_id, vx=5.0, vy=-10.0)
-```
+通常敵を生成（最大 300 体）。`scale` でサイズ倍率を指定（0.25〜4.0）。
+
+### `api.spawn_snake(x, y, width=60, height=20, speed=3, move_range=150, scale=1.0)`
+
+重力無しの往復移動蛇型敵。`scale` でサイズ倍率を指定（0.25〜4.0）。
+
+### `api.set_enemy_vel(enemy_id, vx=None, vy=None)`
+
+敵速度を直接指定。両軸指定時は合成速度が 15.0 を超えると正規化。片方のみならその軸を ±15 にクランプ。省略した軸は変更なし。
+
+### `api.set_enemy_pos(enemy_id, x=None, y=None)`
+
+敵位置を即時テレポート。`x` 指定時 patrol 原点も更新。`y` 指定＋重力ありなら `vy=0`。
 
 ### `api.enemy_jump(enemy_id)`
 
-敵をジャンプさせます。
+地面や足場上にいる敵をジャンプさせる（固定強さ）。
 
-**引数:**
-- `enemy_id` (int): 敵のID
+### `api.set_enemy_scale(enemy_id, scale)`
 
-**注意:**
-- 敵が地面に接している時のみジャンプします
-
-**使用例:**
-```python
-# プレイヤーが近づいたら敵をジャンプさせる
-for enemy in state["enemies"]:
-    enemy_id = enemy["id"]
-    dx = abs(state["player"]["x"] - enemy["x"])
-    
-    if dx < 100:  # 100ピクセル以内なら
-        api.enemy_jump(enemy_id)
-```
+指定した敵（または `enemy_id="all"` で全員）の倍率を変更。範囲は 0.25〜4.0。足元を基準に拡縮し、当たり判定とスプライトを一括で更新します。
 
 ---
 
-## ゴールの制御
+## ゴール制御
 
 ### `api.get_goal_pos()`
 
-ゴールの現在位置を取得します。
-
-**戻り値:**
-- `dict`: `{"x": world_x, "y": y}` または `None`
-
-**使用例:**
-```python
-goal_pos = api.get_goal_pos()
-if goal_pos:
-    print(f"ゴール位置: x={goal_pos['x']}, y={goal_pos['y']}")
-    
-    # プレイヤーとゴールの距離を計算
-    px = state["player"]["x"]
-    distance = abs(px - goal_pos["x"])
-```
+ゴール位置 `{"x": world_x, "y": y}` を取得。
 
 ### `api.move_goal(dx, dy=0)`
 
-ゴールを相対的に移動させます。
-
-**引数:**
-- `dx` (float): x方向の移動量
-- `dy` (float): y方向の移動量（デフォルト: 0）
-
-**使用例:**
-```python
-# ゴールを右に100、上に50移動
-api.move_goal(100, -50)
-
-# ゴールを上に200移動（逃げる演出）
-api.move_goal(0, -200)
-```
+相対移動。
 
 ### `api.set_goal_pos(x, y)`
 
-ゴールを絶対座標で設定します。
+絶対座標で再配置。
 
-**引数:**
-- `x` (float): ワールド座標でのx位置
-- `y` (float): y座標
+### ゴール関連高レベル
 
-**使用例:**
+`api.goal_move_on_approach(state, memory, ...)` 接近時にゴール退避＋元位置へ敵生成（1回）。
+
+---
+
+## 足場制御
+
+### `api.get_platform_pos(index)`
+
+足場の現在位置。
+
+### `api.set_platform_velocity(index, vx, vy)`
+
+足場の移動速度設定。
+
+### `api.stop_platform(index)`
+
+停止。
+
+### 高レベル
+
+`api.platform_oscillate(memory, ...)` 指定足場を往復運動。
+
+---
+
+## 背景 / 表示
+
+### `api.set_bg_color((r,g,b))`
+
+背景色を即時変更。
+
+### `api.show_text(text, duration=3.0, color=(255,255,255))`
+
+右上にメッセージ表示（再呼び出しで上書き）。
+
+---
+
+## 高レベル API
+
+### `api.spawn_enemy_periodically(state, memory, interval_ms=1000, spawn_chance=0.5, offset_x=400)`
+
+一定間隔＋確率でプレイヤー前方に敵生成。
+
+### `api.enemy_chase_and_jump(state, memory, chase_distance=150, jump_chance=0.01, jump_cooldown_ms=500)`
+
+敵を追尾させ近距離でランダムジャンプ。
+
+### `api.goal_move_on_approach(state, memory, approach_distance=50, move_dy=-200, spawn_enemy_at_goal=True)`
+
+ゴール接近イベント演出。
+
+### `api.platform_oscillate(memory, platform_indices=[0,1], speeds=[(0,-1),(0,1)], move_range=80)`
+
+足場往復の自動反転制御。
+
+---
+
+## デバッグ / ログ
+
+内部コマンド（直接 API 呼び出し不要）：
+
+- `runner_log` ゲーム側へログ送信。
+- `runner_error` スクリプト例外内容表示。
+
+---
+
+## 注意点まとめ
+
+1. 入力操作による横加速は常に `physics.max_speed` 制限。`set_player_vel(limit=False)` は無制限。
+2. 垂直速度は内部的に ±60 へクランプし物理暴走を防止。
+3. 敵速度は合成 15.0 超過で正規化し不自然な瞬間移動を抑制。
+4. 敵総数 300 超過の `spawn_enemy` / `spawn_snake` は無視。
+5. `set_player_pos(x)` はカメラを滑らか追従させるため一瞬でジャンプしない。
+6. 大き過ぎる `vx` を頻繁に与えると背景スクロールが粗く見える場合あり（演出目的で許容）。
+7. `update_config` は構造丸ごと差し替えではなくキー更新用途推奨。
+
+---
+
+## 使用例
+
 ```python
-# ゴールを特定位置に配置
-api.set_goal_pos(1600, 520)
+# 物理設定をまとめて変更
+api.update_config({"physics": {"gravity": 0.6, "max_speed": 12.0}})
+
+# ゴールへ滑らか移動開始
+goal = api.get_goal_pos()
+if goal:
+    api.set_player_pos(x=goal["x"])
+
+# 敵へ高速ベクトル付与
+for e in state["enemies"]:
+    api.set_enemy_vel(e["id"], vx=14, vy=-12)
+
+# 足場往復開始
+api.platform_oscillate(memory, platform_indices=[0,1], speeds=[(0,-1),(0,1)], move_range=100)
+
+# プレイヤーを巨大化
+api.set_player_scale(1.8)
+
+# メッセージ表示
+api.show_text("Start!", duration=2.0)
 ```
 
 ---
 
-## 足場の制御
-
-### `api.get_platform_pos(platform_index)`
-
-足場の現在位置を取得します。
-
-**引数:**
-- `platform_index` (int): 足場のインデックス（0から始まる）
-
-**戻り値:**
-- `dict`: `{"x": world_x, "y": y}` または `None`
-
-**使用例:**
-```python
-# 最初の足場の位置を取得
-pos = api.get_platform_pos(0)
-if pos:
-    print(f"足場0の位置: x={pos['x']}, y={pos['y']}")
-```
-
-### `api.set_platform_velocity(platform_index, vx, vy)`
-
-足場の移動速度を設定します。
-
-**引数:**
-- `platform_index` (int): 足場のインデックス（0から始まる）
-- `vx` (float): x方向の速度（正で右、負で左）
-- `vy` (float): y方向の速度（正で下、負で上）
-
-**使用例:**
-```python
-# 足場を右に移動
-api.set_platform_velocity(0, vx=2, vy=0)
-
-# 足場を上に移動
-api.set_platform_velocity(1, vx=0, vy=-1)
-
-# 足場を斜めに移動
-api.set_platform_velocity(2, vx=1, vy=-1)
-```
-
-### `api.stop_platform(platform_index)`
-
-足場の移動を停止します。
-
-**引数:**
-- `platform_index` (int): 足場のインデックス（0から始まる）
-
-**使用例:**
-```python
-# 最初の足場を停止
-api.stop_platform(0)
-```
-
----
-
-## 視覚効果
-
-### `api.set_bg_color(rgb)`
-
-背景色を変更します。
-
-**引数:**
-- `rgb` (tuple): RGB値のタプル `(r, g, b)`
-  - 各値は 0 〜 255
-
-**使用例:**
-```python
-# 青い背景
-api.set_bg_color((100, 150, 200))
-
-# 赤い背景
-api.set_bg_color((200, 50, 50))
-
-# 暗い背景
-api.set_bg_color((30, 30, 30))
-
-# 時間経過で背景色を変える
-time_sec = state["world"]["time_ms"] / 1000.0
-r = int(128 + 127 * math.sin(time_sec))
-api.set_bg_color((r, 100, 150))
-```
-
----
-
-## 便利機能（高レベルAPI）
-
-これらは複雑な処理を簡単に実装できる高レベルAPIです。
-
-### `api.spawn_enemy_periodically(state, memory, ...)`
-
-定期的にプレイヤーの前方に敵を出現させます。
-
-**引数:**
-- `state` (dict): ゲーム状態（必須）
-- `memory` (dict): メモリ辞書（必須、`"last_spawn_time"` キーを使用）
-- `interval_ms` (int): 出現間隔（ミリ秒、デフォルト: 1000）
-- `spawn_chance` (float): 出現確率（0.0〜1.0、デフォルト: 0.5）
-- `offset_x` (float): プレイヤーからのx方向オフセット（デフォルト: 400）
-
-**使用例:**
-```python
-# 基本的な使い方（1秒ごとに50%の確率で敵を出現）
-api.spawn_enemy_periodically(state, memory)
-
-# カスタマイズ: 2秒ごとに80%の確率で、プレイヤーの300ピクセル先に出現
-api.spawn_enemy_periodically(
-    state, memory,
-    interval_ms=2000,
-    spawn_chance=0.8,
-    offset_x=300
-)
-
-# 高頻度で出現させる
-api.spawn_enemy_periodically(state, memory, interval_ms=500, spawn_chance=1.0)
-```
-
-### `api.enemy_chase_and_jump(state, memory, ...)`
-
-全ての敵がプレイヤーを追跡し、近づいたらランダムでジャンプします。
-
-**引数:**
-- `state` (dict): ゲーム状態（必須）
-- `memory` (dict): メモリ辞書（必須、`"enemy_jump_cooldown"` キーを使用）
-- `chase_distance` (float): ジャンプ判定する距離（デフォルト: 150）
-- `jump_chance` (float): ジャンプ確率（0.0〜1.0、デフォルト: 0.01）
-- `jump_cooldown_ms` (int): ジャンプのクールダウン（ミリ秒、デフォルト: 500）
-
-**使用例:**
-```python
-# 基本的な使い方
-api.enemy_chase_and_jump(state, memory)
-
-# カスタマイズ: 200ピクセル以内で5%の確率でジャンプ、1秒のクールダウン
-api.enemy_chase_and_jump(
-    state, memory,
-    chase_distance=200,
-    jump_chance=0.05,
-    jump_cooldown_ms=1000
-)
-
-# より攻撃的な敵（高確率、短クールダウン）
-api.enemy_chase_and_jump(
-    state, memory,
-    chase_distance=200,
-    jump_chance=0.1,
-    jump_cooldown_ms=300
-)
-```
-
-### `api.goal_move_on_approach(state, memory, ...)`
-
-プレイヤーがゴールに接近したら、ゴールを移動させて元の位置に敵を出現させます（1回のみ実行）。
-
-**引数:**
-- `state` (dict): ゲーム状態（必須）
-- `memory` (dict): メモリ辞書（必須、`"goal_approached"` キーを使用）
-- `approach_distance` (float): 接近と判定する距離（デフォルト: 50）
-- `move_dy` (float): ゴールを移動させるy方向の距離（デフォルト: -200）
-- `spawn_enemy_at_goal` (bool): ゴールの元の位置に敵を出現させるか（デフォルト: True）
-
-**使用例:**
-```python
-# 基本的な使い方（50ピクセル以内で発動、ゴールを200上に移動）
-api.goal_move_on_approach(state, memory)
-
-# カスタマイズ: 100ピクセル以内で発動、ゴールを300上に移動、敵は出現させない
-api.goal_move_on_approach(
-    state, memory,
-    approach_distance=100,
-    move_dy=-300,
-    spawn_enemy_at_goal=False
-)
-
-# ゴールを下に移動させる（落とし穴風）
-api.goal_move_on_approach(
-    state, memory,
-    move_dy=200
-)
-```
-
-### `api.platform_oscillate(memory, ...)`
-
-足場を往復運動させます（上下・左右・斜め対応）。
-
-**引数:**
-- `memory` (dict): メモリ辞書（必須、`"platform_initial_pos"`, `"platform_speeds"`, `"platform_range"` キーを使用）
-- `platform_indices` (list): 制御する足場のインデックスリスト（デフォルト: [0, 1]）
-- `speeds` (list): 各足場の初期速度タプルのリスト `[(vx1, vy1), (vx2, vy2), ...]`
-  - vx: 正で右方向、負で左方向
-  - vy: 正で下方向、負で上方向
-  - デフォルト: `[(0, -1), (0, 1)]`（上下のみ）
-- `move_range` (int): 移動範囲（ピクセル、デフォルト: 80)
-
-**使用例:**
-```python
-# 基本的な使い方（足場0と1を上下に80ピクセルの範囲で往復）
-api.platform_oscillate(memory)
-
-# カスタマイズ: 3つの足場を制御、移動範囲を100ピクセルに
-api.platform_oscillate(
-    memory,
-    platform_indices=[0, 1, 2],
-    speeds=[(0, -1), (0, 1), (0, -2)],  # 3番目は2倍速
-    move_range=100
-)
-
-# 足場を横方向にも動かす（左右往復）
-api.platform_oscillate(
-    memory,
-    platform_indices=[0],
-    speeds=[(2, 0)],  # 左右のみ往復
-    move_range=120
-)
-
-# 斜め方向に往復
-api.platform_oscillate(
-    memory,
-    platform_indices=[1],
-    speeds=[(1, -1)],  # 右斜め上と左斜め下を往復
-    move_range=100
-)
-```
-
----
-
-## 完全な使用例
-
-以下は `script_user.py` での完全な使用例です。
-
-```python
-# 来場者がいじるスクリプト
-
-# 簡単なメモリ（状態を覚えておきたいとき用）
-memory = {}
-
-def on_init(state, api):
-    """
-    ゲーム起動時 または script_user リロード時に1回だけ呼ばれる。
-    """
-    # プレイヤーの速さを2倍に
-    original_max_speed = api.get_original_config("physics.max_speed")
-    if original_max_speed:
-        api.set_config("physics.max_speed", original_max_speed * 2)
-    
-    # 背景色を青系に
-    api.set_bg_color((100, 150, 200))
-    
-    # 重力を弱くする
-    api.set_gravity(0.5)
-
-def on_tick(state, api):
-    """
-    毎フレーム main から呼ばれる。
-    """
-    # 便利APIを組み合わせて使用
-    api.spawn_enemy_periodically(state, memory, interval_ms=1500, spawn_chance=0.7)
-    api.enemy_chase_and_jump(state, memory, chase_distance=200, jump_chance=0.05)
-    api.goal_move_on_approach(state, memory, approach_distance=80)
-    api.platform_oscillate(memory, move_range=100)
-    
-    # 時間経過で背景色を変化
-    import math
-    time_sec = state["world"]["time_ms"] / 1000.0
-    r = int(100 + 50 * math.sin(time_sec * 0.5))
-    g = int(150 + 50 * math.cos(time_sec * 0.3))
-    api.set_bg_color((r, g, 200))
-```
-
----
-
-## Tips
-
-### メモリの管理
-
-便利機能を使う場合、`memory` 辞書を適切に初期化する必要があります。
-
-```python
-# 必要なキーを事前に初期化（オプション）
-memory = {
-    "last_spawn_time": 0,
-    "enemy_jump_cooldown": {},
-    "goal_approached": False,
-    "platform_initial_pos": {},
-    "platform_speeds": {},
-    "platform_range": 80,
-}
-```
-
-ただし、便利APIは自動的に必要なキーを初期化するため、空の辞書 `memory = {}` でも動作します。
-
-### 状態の取得
-
-`state` 辞書から様々な情報を取得できます:
-
-```python
-# プレイヤー情報
-px = state["player"]["x"]
-py = state["player"]["y"]
-
-# 経過時間（ミリ秒）
-time_ms = state["world"]["time_ms"]
-
-# 全ての敵
-for enemy in state["enemies"]:
-    enemy_id = enemy["id"]
-    ex = enemy["x"]
-    ey = enemy["y"]
-    # ...
-```
-
-
----
-
-## 制限事項
-
-- 敵の最大数: 300体
-- 重力の範囲: -5.0 〜 5.0
-- 最大速度の範囲: 0.5 〜 30.0
-- 敵の速度の最大値: 15.0
-- RGB値の範囲: 0 〜 255
-
----
-
-以上が GameAPI の全リファレンスです。自由に組み合わせて、面白いゲーム体験を作ってください！
+最終更新: RemoteAPI 実装と同期。

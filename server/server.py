@@ -156,7 +156,7 @@ async def update_script(body: PromptBody):
         print(f"User prompt: {body.prompt}")
         
         resp = openai.chat.completions.create(
-            model="gpt-5-mini",  # モデル名は正常
+            model="gpt-5.1-codex-mini",  # モデル名は正常
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": body.prompt},
@@ -255,5 +255,22 @@ if __name__ == "__main__":
     if not os.getenv("OPENAI_API_KEY"):
         print("警告: OPENAI_API_KEY 環境変数が設定されていません")
         print("環境変数を設定するか、コード内で直接 openai.api_key を設定してください")
+    
+    # ngrok を使用してトンネルを作成
+    try:
+        from pyngrok import ngrok
+        
+        # ngrok トンネルを開く
+        public_url = ngrok.connect(8000, bind_tls=True)
+        print(f"\n{'='*60}")
+        print(f"✓ ngrok トンネル作成完了")
+        print(f"{'='*60}")
+        print(f"公開 URL: {public_url}")
+        print(f"ローカルサーバー: http://localhost:8000")
+        print(f"{'='*60}\n")
+        
+    except Exception as e:
+        print(f"⚠ ngrok の初期化に失敗しました: {e}")
+        print("ngrok なしでサーバーを起動します\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)

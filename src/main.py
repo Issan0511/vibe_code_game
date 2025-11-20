@@ -81,14 +81,22 @@ display_text_color = (255, 255, 255)
 BG_WIDTH = config['background']['tile_width']
 camera_x = 0.0           # カメラのx位置（世界座標）
 camera_vx = 0.0          # カメラの速度（慣性用）
+camera_target_x = None   # camera を徐々に合わせたい目標座標（None なら追従なし）
+
+# カメラ追従の設定
+# 遠いほど強く近づけるため、距離に応じた比例ゲインで速度を決める
+CAMERA_FOLLOW_GAIN = 0.12  # 距離 -> 補間速度の比例係数
+CAMERA_FOLLOW_MAX = 40.0   # 追従速度の上限
 
 # =========================
 # 敵を複数配置
 # =========================
 enemies = [
-    Enemy(world_x=e['world_x'], y=GROUND_Y, 
+    Enemy(world_x=e['world_x'], 
+          y=GROUND_Y - e.get('y_offset', 0), 
           move_range=e['move_range'], speed=e['speed'],
           width=e['width'], height=e['height'],
+          scale=e.get('scale', 1.0),
           use_gravity=e.get('use_gravity', True))
     for e in config['enemies']
 ]
@@ -147,10 +155,11 @@ class CustomConnection:
         self.server_sock.listen(1)
 
         # custom_runner.py を起動
+        # デバッグ用に stdout/stderr を表示するように変更
         self.proc = subprocess.Popen(
             [sys.executable, "server/custom_runner.py"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
+            # stdout=subprocess.DEVNULL,
+            # stderr=subprocess.STDOUT,
         )
 
         print("Waiting for custom_runner...")
@@ -213,6 +222,8 @@ def clamp(v, lo, hi):
 
 def apply_command(cmd):
     global config, display_text, display_text_timer, display_text_color
+    global enemies, platforms, goal, cliffs, SCREEN_WIDTH, SCREEN_HEIGHT, FPS, GROUND_Y, BG_WIDTH
+    global camera_x, camera_vx, camera_target_x
 
     op = cmd.get("op")
 
@@ -229,6 +240,7 @@ def apply_command(cmd):
     elif op == "set_config":
         key = cmd.get("key", "")
         val = cmd.get("value")
+        print(f"[DEBUG] main.py received set_config: {key} = {val}") # Debug print
         keys = key.split(".")
         cur = config
         for k in keys[:-1]:
@@ -237,14 +249,75 @@ def apply_command(cmd):
             cur = cur[k]
         cur[keys[-1]] = val
 
+        # --- 動的な反映処理 ---
+        if key == "enemies":
+            enemies.clear()
+            enemies.extend([
+                Enemy(world_x=e['world_x'], 
+                      y=GROUND_Y - e.get('y_offset', 0), 
+                      move_range=e['move_range'], speed=e['speed'],
+                      width=e['width'], height=e['height'],
+                      scale=e.get('scale', 1.0),
+                      use_gravity=e.get('use_gravity', True))
+                for e in val
+            ])
+        elif key == "platforms":
+            new_platforms, _ = load_level(config, GROUND_Y)
+            platforms.clear()
+            platforms.extend(new_platforms)
+        elif key == "goal":
+            _, new_goal = load_level(config, GROUND_Y)
+            goal = new_goal
+        elif key.startswith("goal."):
+            # ゴールのプロパティが変更された場合も再ロード
+            _, new_goal = load_level(config, GROUND_Y)
+            goal = new_goal
+        elif key == "cliffs":
+            cliffs = val
+        elif key == "ground.y_offset":
+            GROUND_Y = SCREEN_HEIGHT - val
+            # 地面が変わったら足場とゴールも再配置
+            new_platforms, new_goal = load_level(config, GROUND_Y)
+            platforms.clear()
+            platforms.extend(new_platforms)
+            goal = new_goal
+        elif key == "screen.width":
+            SCREEN_WIDTH = val
+            pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        elif key == "screen.height":
+            SCREEN_HEIGHT = val
+            pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        elif key == "screen.fps":
+            FPS = val
+        elif key.startswith("player."):
+            if key == "player.width": player.width = val
+            elif key == "player.height": player.height = val
+            elif key == "player.x": player.x_screen = val
+            elif key == "player.color": player.color = tuple(val)
+            elif key == "player.scale": player.set_scale(float(val))
+        elif key.startswith("enemy."):
+            parts = key.split(".")
+            if len(parts) == 3 and parts[1].isdigit():
+                idx = int(parts[1])
+                prop = parts[2]
+                if 0 <= idx < len(enemies):
+                    if prop == "scale":
+                        enemies[idx].set_scale(float(val))
+        elif key.startswith("background."):
+            if key == "background.tile_width":
+                BG_WIDTH = val
+
     elif op == "spawn_enemy":
         if len(enemies) >= 300:
             return
         x = float(cmd.get("x", camera_x + 800))
         y = float(cmd.get("y", GROUND_Y))
+        speed = float(cmd.get("speed", 2.0))
+        use_gravity = bool(cmd.get("use_gravity", True))
+        scale = float(cmd.get("scale", 1.0))
         enemies.append(
-            Enemy(world_x=x, y=y, move_range=100, speed=2,
-                  width=40, height=40, use_gravity=True)
+            Enemy(world_x=x, y=y, move_range=100, speed=speed,
+                  width=40, height=40, scale=scale, use_gravity=use_gravity)
         )
 
     elif op == "spawn_snake":
@@ -256,8 +329,9 @@ def apply_command(cmd):
         height = int(cmd.get("height", 20))
         speed = float(cmd.get("speed", 3))
         move_range = int(cmd.get("move_range", 150))
+        scale = float(cmd.get("scale", 1.0))
         snake = Enemy(world_x=x, y=y, move_range=move_range, speed=speed,
-                     width=width, height=height, use_gravity=False)
+                     width=width, height=height, scale=scale, use_gravity=False)
         snake.color = (0, 200, 0)  # 緑色で蛇らしく
         enemies.append(snake)
 
@@ -268,26 +342,73 @@ def apply_command(cmd):
 
     elif op == "set_enemy_vel":
         eid = cmd.get("id")
-        vx = float(cmd.get("vx", 0.0))
-        vy = cmd.get("vy", None)
+        vx_raw = cmd.get("vx")
+        vy_raw = cmd.get("vy")
+        if eid is None or (vx_raw is None and vy_raw is None):
+            return
+
+        vx = float(vx_raw) if vx_raw is not None else None
+        vy = float(vy_raw) if vy_raw is not None else None
         MAX_V = 15.0
-        if vy is not None:
-            vy = float(vy)
-            speed2 = vx*vx + vy*vy
-            if speed2 > MAX_V*MAX_V:
-                s = MAX_V / (speed2 ** 0.5)
-                vx *= s
-                vy *= s
-        else:
-            if abs(vx) > MAX_V:
-                vx = MAX_V if vx > 0 else -MAX_V
+
+        if vx is not None and vy is not None:
+            speed2 = vx * vx + vy * vy
+            if speed2 > MAX_V * MAX_V:
+                scale = MAX_V / (speed2 ** 0.5)
+                vx *= scale
+                vy *= scale
+        elif vx is not None:
+            vx = clamp(vx, -MAX_V, MAX_V)
+        elif vy is not None:
+            vy = clamp(vy, -MAX_V, MAX_V)
 
         for e in enemies:
             if e.id == eid:
                 e.use_api_control = True
-                e.vx = vx
+                if vx is not None:
+                    e.vx = vx
                 if vy is not None:
                     e.vy = vy
+                break
+
+    elif op == "set_enemy_scale":
+        eid = cmd.get("id")
+        scale = cmd.get("scale")
+        if scale is None:
+            return
+        target_all = eid == "all"
+        if eid is None and not target_all:
+            return
+        try:
+            scale_value = float(scale)
+        except (TypeError, ValueError):
+            return
+
+        for e in enemies:
+            if target_all or e.id == eid:
+                e.set_scale(scale_value)
+                if not target_all:
+                    break
+
+    elif op == "set_enemy_pos":
+        eid = cmd.get("id")
+        if eid is None:
+            return
+        x = cmd.get("x")
+        y = cmd.get("y")
+        if x is None and y is None:
+            return
+
+        for e in enemies:
+            if e.id == eid:
+                if x is not None:
+                    new_x = float(x)
+                    e.world_x = new_x
+                    e.center_x = new_x  # keep patrol origin in sync
+                if y is not None:
+                    e.y = float(y)
+                    if e.use_gravity:
+                        e.vy = 0
                 break
 
     elif op == "enemy_jump":
@@ -298,6 +419,38 @@ def apply_command(cmd):
                 if e.y >= GROUND_Y:
                     e.vy = jump_strength
                 break
+
+    elif op == "set_player_pos":
+        x = cmd.get("x")
+        y = cmd.get("y")
+        if x is not None:
+            # 直接ジャンプしてカメラをテレポートするのではなく、目標位置に追従する
+            camera_target_x = float(x) - player.x_screen
+        if y is not None:
+            player.y = float(y)
+
+    elif op == "set_player_vel":
+        vx = cmd.get("vx")
+        vy = cmd.get("vy")
+        limit = bool(cmd.get("limit", False))
+        if vx is not None:
+            max_spd = max(0.0, float(config['physics']['max_speed']))
+            if limit:
+                camera_vx = clamp(float(vx), -max_spd, max_spd)
+            else:
+                camera_vx = float(vx)
+        if vy is not None:
+            MAX_PLAYER_VY = 60.0
+            player.vy = clamp(float(vy), -MAX_PLAYER_VY, MAX_PLAYER_VY)
+
+    elif op == "set_player_scale":
+        scale = cmd.get("scale")
+        if scale is None:
+            return
+        try:
+            player.set_scale(float(scale))
+        except (TypeError, ValueError):
+            return
 
     elif op == "set_bg_color":
         col = cmd.get("color", [135, 206, 235])
@@ -350,6 +503,55 @@ def apply_command(cmd):
             print(trace)
 
 # =========================
+# ゲームリセット関数
+# =========================
+def reset_game():
+    global game_over, game_clear, camera_x, camera_vx, enemies, platforms, goal, config, cliffs
+    global camera_target_x
+    
+    # 設定を再読み込み（オブジェクトIDを維持して更新）
+    try:
+        with open('config/config.json', 'r', encoding='utf-8') as f:
+            new_config = json.load(f)
+            config.clear()
+            config.update(new_config)
+    except Exception as e:
+        print(f"Failed to reload config: {e}")
+    
+    game_over = False
+    game_clear = False
+    camera_x = 0.0
+    camera_vx = 0.0
+    camera_target_x = None
+    
+    player.reset()
+    
+    # 敵を再生成
+    enemies.clear()
+    enemies.extend([
+        Enemy(world_x=e['world_x'], 
+              y=GROUND_Y - e.get('y_offset', 0), 
+              move_range=e['move_range'], speed=e['speed'],
+              width=e['width'], height=e['height'],
+              scale=e.get('scale', 1.0),
+              use_gravity=e.get('use_gravity', True))
+        for e in config['enemies']
+    ])
+    
+    # 足場とゴールを再生成
+    new_platforms, new_goal = load_level(config, GROUND_Y)
+    platforms.clear()
+    platforms.extend(new_platforms)
+    goal = new_goal
+    
+    # 崖情報を更新
+    cliffs = config.get('cliffs', [])
+    
+    # custom_runner を再起動（script_user.py の再読み込みと init 実行）
+    custom_conn.restart()
+    print("Game Reset!")
+
+# =========================
 # TCP接続を初期化
 # =========================
 custom_conn = CustomConnection()
@@ -387,20 +589,7 @@ while running:
                 player.start_jump()
             # R キーでリセット
             if event.key == pygame.K_r:
-                # プレイヤーの位置をリセット
-                player.reset()
-                camera_x = 0.0
-                camera_vx = 0.0
-                
-                # ゴールをリセット
-                goal.reset_position()
-                
-                # 足場をリセット
-                for platform in platforms:
-                    platform.reset_position()
-                
-                # custom_runner を再起動してメモリをリセット
-                custom_conn.restart()
+                reset_game()
         # スペースキーを離したらジャンプ持続終了
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_SPACE:
@@ -439,6 +628,19 @@ while running:
                     camera_vx = 0
         
         camera_x += camera_vx
+
+        # --- camera follow: 距離に応じた追従 ---
+        # camera_target_x が設定されている場合、距離に応じて速く/遅く近づく
+        if camera_target_x is not None:
+            dx = camera_target_x - camera_x
+            # 小さければ直接位置合わせして終了
+            if abs(dx) < 0.5:
+                camera_x = camera_target_x
+                camera_target_x = None
+            else:
+                # 距離を元に補間速度を決める（遠いほど大きく）
+                follow_vx = clamp(dx * CAMERA_FOLLOW_GAIN, -CAMERA_FOLLOW_MAX, CAMERA_FOLLOW_MAX)
+                camera_x += follow_vx
 
         # =========================
         # 足場の更新
@@ -555,29 +757,7 @@ while running:
         # ゲーム終了後、Rキーでリスタート
         keys = pygame.key.get_pressed()
         if keys[pygame.K_r]:
-            # リセット
-            game_over = False
-            game_clear = False
-            camera_x = 0.0
-            camera_vx = 0.0
-            player.reset()
-            # 敵をリセット
-            enemies.clear()
-            enemies.extend([
-                Enemy(world_x=e['world_x'], y=GROUND_Y, 
-                      move_range=e['move_range'], speed=e['speed'],
-                      width=e['width'], height=e['height'],
-                      use_gravity=e.get('use_gravity', True))
-                for e in config['enemies']
-            ])
-            
-            # ゴールと足場をリセット
-            goal.reset_position()
-            for platform in platforms:
-                platform.reset_position()
-            
-            # custom_runner を再起動
-            custom_conn.restart()
+            reset_game()
 
     # =========================
     # 描画

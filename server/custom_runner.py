@@ -72,15 +72,67 @@ class RemoteAPI:
         # フォールバック: state が無い場合は original_config を返す
         return self.get_original_config(key)
 
+    def update_config(self, config_dict):
+        """
+        JSON 形式で config を更新する
+        例: api.update_config({"physics": {"gravity": 0.6, "max_speed": 15.0}})
+        ネストされたキーは自動的に処理される
+        """
+        def flatten_dict(d, parent_key=''):
+            """ネストされた辞書をフラット化する"""
+            items = []
+            for k, v in d.items():
+                new_key = f"{parent_key}.{k}" if parent_key else k
+                if isinstance(v, dict):
+                    items.extend(flatten_dict(v, new_key).items())
+                else:
+                    items.append((new_key, v))
+            return dict(items)
+        
+        flat_config = flatten_dict(config_dict)
+        print(f"[DEBUG] update_config called with {len(flat_config)} items") # Debug print
+        for key, value in flat_config.items():
+            print(f"[DEBUG] set_config: {key} = {value}") # Debug print
+            self.set_config(key, value)
+
     # ---- 敵関連 ----
     def set_enemy_vel(self, enemy_id, vx, vy=None):
         cmd = {
             "op": "set_enemy_vel",
             "id": enemy_id,
-            "vx": vx,
         }
+        if vx is not None:
+            cmd["vx"] = vx
         if vy is not None:
             cmd["vy"] = vy
+        self.commands.append(cmd)
+
+    def set_enemy_pos(self, enemy_id, x=None, y=None):
+        if x is None and y is None:
+            return
+        cmd = {
+            "op": "set_enemy_pos",
+            "id": enemy_id,
+        }
+        if x is not None:
+            cmd["x"] = x
+        if y is not None:
+            cmd["y"] = y
+        self.commands.append(cmd)
+
+    def set_enemy_scale(self, enemy_id, scale):
+        if scale is None:
+            return
+        if enemy_id is None and enemy_id != "all":
+            return
+        cmd = {
+            "op": "set_enemy_scale",
+            "scale": float(scale)
+        }
+        if enemy_id == "all":
+            cmd["id"] = "all"
+        else:
+            cmd["id"] = enemy_id
         self.commands.append(cmd)
 
     def enemy_jump(self, enemy_id):
@@ -89,11 +141,14 @@ class RemoteAPI:
             "id": enemy_id,
         })
 
-    def spawn_enemy(self, x, y):
+    def spawn_enemy(self, x, y, use_gravity=True, speed=2, scale=1.0):
         self.commands.append({
             "op": "spawn_enemy",
             "x": x,
             "y": y,
+            "use_gravity": bool(use_gravity),
+            "speed": float(speed),
+            "scale": float(scale),
         })
 
     def show_text(self, text, duration=3.0, color=(255, 255, 255)):
@@ -105,7 +160,7 @@ class RemoteAPI:
             "color": list(color)
         })
 
-    def spawn_snake(self, x, y, width=60, height=20, speed=3, move_range=150):
+    def spawn_snake(self, x, y, width=60, height=20, speed=3, move_range=150, scale=1.0):
         """重力を受けない蛇タイプの敵を生成"""
         self.commands.append({
             "op": "spawn_snake",
@@ -115,6 +170,7 @@ class RemoteAPI:
             "height": height,
             "speed": speed,
             "move_range": move_range,
+            "scale": float(scale),
         })
 
     def set_max_jumps(self, max_jumps):
@@ -122,6 +178,37 @@ class RemoteAPI:
         self.commands.append({
             "op": "set_max_jumps",
             "value": int(max_jumps),
+        })
+
+    def set_player_pos(self, x=None, y=None):
+        if x is None and y is None:
+            return
+        cmd = {"op": "set_player_pos"}
+        if x is not None:
+            cmd["x"] = x
+        if y is not None:
+            cmd["y"] = y
+        self.commands.append(cmd)
+
+    def set_player_vel(self, vx=None, vy=None, limit=False):
+        if vx is None and vy is None:
+            return
+        cmd = {"op": "set_player_vel"}
+        if vx is not None:
+            cmd["vx"] = vx
+        if vy is not None:
+            cmd["vy"] = vy
+        # include whether to apply max_speed limit; default False -> no limit
+        if limit:
+            cmd["limit"] = True
+        self.commands.append(cmd)
+
+    def set_player_scale(self, scale):
+        if scale is None:
+            return
+        self.commands.append({
+            "op": "set_player_scale",
+            "scale": float(scale)
         })
 
     # ---- 背景色 ----
@@ -311,6 +398,8 @@ def main():
 
     api = RemoteAPI()
     did_init = False
+    
+    print("[DEBUG] custom_runner started") # Debug print
 
     # script_user をリロードして最新のコードを読み込む
     # ファイルの最終更新時刻を監視し、変更があれば実行時に再読み込みする

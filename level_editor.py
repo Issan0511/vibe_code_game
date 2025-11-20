@@ -111,6 +111,12 @@ class LevelEditor:
                     self.selected_object = None
                 elif event.key == pygame.K_DELETE or event.key == pygame.K_BACKSPACE:
                     self.delete_selected()
+                elif event.key == pygame.K_g:
+                    # 選択中の敵の重力設定をトグル
+                    if self.selected_object and self.selected_object[0] == 'enemy':
+                        enemy = self.selected_object[1]
+                        enemy['use_gravity'] = not enemy.get('use_gravity', True)
+                        print(f"Enemy gravity: {enemy['use_gravity']}")
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1: # Left click
@@ -144,8 +150,12 @@ class LevelEditor:
             
         elif self.mode == "enemy":
             # 即座に追加
+            # y_offset: 地面からの高さ（正の値で上空へ）
+            y_offset = max(0, self.ground_y - self.snap_to_grid(wy))
+            
             new_enemy = {
                 "world_x": self.snap_to_grid(wx),
+                "y_offset": y_offset,
                 "move_range": 100,
                 "speed": 2,
                 "width": 40,
@@ -179,12 +189,11 @@ class LevelEditor:
                 obj['y_offset'] -= dy # y_offsetは地面からの高さなので逆
             elif obj_type == 'enemy':
                 obj['world_x'] += dx
-                # enemyにはyがない（地面固定）が、空中の敵もいるかも？
-                # 現状のconfig構造だとyがない場合もあるが、main.pyではGROUND_Y固定か？
-                # config.jsonを見るとyはない。main.pyでGROUND_Yに配置している。
-                # しかし、空中敵も作りたいかもしれない。
-                # いったんxのみ移動
-                pass
+                # y_offsetを更新（地面からの高さ）
+                # dyは画面座標系（下がプラス）なので、y_offset（上がプラス）には引く
+                current_y_offset = obj.get('y_offset', 0)
+                obj['y_offset'] = max(0, current_y_offset - dy)
+                
             elif obj_type == 'cliff':
                 obj['start_x'] += dx
                 obj['end_x'] += dx
@@ -248,7 +257,10 @@ class LevelEditor:
         for e in self.config['enemies']:
             # 簡易判定
             ex = e['world_x']
-            ey = self.ground_y - e['height'] # 地面にいると仮定
+            # y_offsetがある場合はそれを使用、なければ0（地面）
+            y_offset = e.get('y_offset', 0)
+            ey = self.ground_y - y_offset - e['height']
+            
             if ex - e['width']//2 <= wx <= ex + e['width']//2 and \
                ey <= wy <= ey + e['height']:
                 self.selected_object = ('enemy', e)
@@ -346,10 +358,24 @@ class LevelEditor:
             ex = e['world_x'] - self.camera_x
             ew = e['width']
             eh = e['height']
-            ey = gy_screen - eh # 地面に配置
+            y_offset = e.get('y_offset', 0)
+            ey = gy_screen - y_offset - eh
+            
             rect = pygame.Rect(ex - ew//2, ey, ew, eh)
-            color = COLOR_SELECTED if self.selected_object and self.selected_object[1] == e else COLOR_ENEMY
+            
+            # 色の決定
+            if self.selected_object and self.selected_object[1] == e:
+                color = COLOR_SELECTED
+            elif not e.get('use_gravity', True):
+                color = (150, 50, 200) # 重力なしは紫
+            else:
+                color = COLOR_ENEMY
+                
             pygame.draw.rect(self.screen, color, rect)
+            
+            # 重力なしの場合のマーク
+            if not e.get('use_gravity', True):
+                pygame.draw.circle(self.screen, (255, 255, 255), (int(ex), int(ey + eh//2)), 5)
 
         # Goal
         g = self.config['goal']
@@ -387,6 +413,23 @@ class LevelEditor:
         surf = self.font.render(mode_text, True, COLOR_TEXT)
         pygame.draw.rect(self.screen, (255, 255, 255), (0, 0, SCREEN_WIDTH, 30))
         self.screen.blit(surf, (10, 5))
+        
+        # 選択中のオブジェクト情報
+        info_text = ""
+        if self.selected_object:
+            obj_type, obj = self.selected_object
+            if obj_type == 'enemy':
+                grav = "ON" if obj.get('use_gravity', True) else "OFF"
+                y_off = obj.get('y_offset', 0)
+                info_text = f"Selected: Enemy (Gravity: {grav} [Press G], Y-Offset: {y_off})"
+            elif obj_type == 'platform':
+                info_text = f"Selected: Platform (Y-Offset: {obj.get('y_offset', 0)})"
+            else:
+                info_text = f"Selected: {obj_type}"
+        
+        if info_text:
+            surf_info = self.font.render(info_text, True, (0, 0, 255))
+            self.screen.blit(surf_info, (10, 35))
         
         cam_text = f"Camera: {int(self.camera_x)}"
         surf2 = self.font.render(cam_text, True, COLOR_TEXT)

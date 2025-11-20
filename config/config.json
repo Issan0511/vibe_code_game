@@ -8,6 +8,7 @@
     "x": 200,
     "width": 40,
     "height": 60,
+    "scale": 1.0,
     "color": [
       50,
       150,
@@ -49,12 +50,14 @@
   },
   "enemies": [
     {
-      "world_x": 409,
+      "world_x": 385,
       "move_range": 80,
       "speed": 2,
       "width": 40,
       "height": 40,
-      "use_gravity": true
+      "scale": 1.0,
+      "use_gravity": false,
+      "y_offset": 127
     },
     {
       "world_x": 1065,
@@ -62,15 +65,18 @@
       "speed": 1.5,
       "width": 40,
       "height": 40,
+      "scale": 1.0,
       "use_gravity": false
     },
     {
-      "world_x": 1822,
+      "world_x": 1941,
       "move_range": 100,
       "speed": 2,
       "width": 40,
       "height": 40,
-      "use_gravity": true
+      "scale": 1.0,
+      "use_gravity": false,
+      "y_offset": 112
     }
   ],
   "platforms": [

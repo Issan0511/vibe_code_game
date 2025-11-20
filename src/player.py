@@ -7,27 +7,35 @@ class Player:
         self.x_screen = x_screen  # Fixed x position on the screen (world coordinate is camera_x + x_screen)
         self.width = config['player']['width']
         self.height = config['player']['height']
+        self.base_width = self.width
+        self.base_height = self.height
         self.color = tuple(config['player']['color'])
 
         # Shoes
         shoe_conf = config['player']['shoe']
         self.shoe_width = shoe_conf['width']
         self.shoe_height = shoe_conf['height']
+        self.base_shoe_width = self.shoe_width
+        self.base_shoe_height = self.shoe_height
         self.shoe_color = tuple(shoe_conf['color'])
+
+        self.scale = 1.0
 
         # Load images
         self.images = []
         self.jump_image = None
+        self.source_images = []
+        self.source_jump_image = None
+        self.use_image = False
         try:
             # Load walking animation (1.png to 8.png)
             for i in range(1, 9):
                 img = pygame.image.load(f'assets/player/{i}.png').convert_alpha()
-                img = pygame.transform.scale(img, (int(self.width * 1.2), int(self.height * 1.2)))
-                self.images.append(img)
+                self.source_images.append(img)
             
             # Load jump image
-            self.jump_image = pygame.image.load('assets/player/jump.png').convert_alpha()
-            self.jump_image = pygame.transform.scale(self.jump_image, (int(self.width * 1.2), int(self.height * 1.2)))
+            self.source_jump_image = pygame.image.load('assets/player/jump.png').convert_alpha()
+            self._refresh_images()
             
             self.use_image = True
         except Exception as e:
@@ -44,7 +52,7 @@ class Player:
         self.ground_y = ground_y
         self.config = config
         # Removed self.gravity to reference config['physics']['gravity'] directly
-        self.jump_strength = -10      # 元の JUMP_STRENGTH と同じ
+        # self.jump_strength = -10      # Removed: use config directly
         self.max_jump_time = 15       # MAX_JUMP_TIME と同じ
 
         # State
@@ -59,10 +67,45 @@ class Player:
         self.max_jumps = 1  # Default is 1 (single jump)
         self.jump_count = 0  # Current jump count
 
+        # Set initial scale from config
+        initial_scale = config['player'].get('scale', 1.0)
+        self.set_scale(initial_scale)
+
+    def _refresh_images(self):
+        if not self.source_images:
+            return
+
+        scaled_width = max(1, int(self.width * 1.2))
+        scaled_height = max(1, int(self.height * 1.2))
+
+        self.images = []
+        for src in self.source_images:
+            self.images.append(pygame.transform.scale(src, (scaled_width, scaled_height)))
+
+        if self.source_jump_image is not None:
+            self.jump_image = pygame.transform.scale(self.source_jump_image, (scaled_width, scaled_height))
+
+    def set_scale(self, scale):
+        safe_scale = max(0.25, min(float(scale), 4.0))
+        prev_bottom = self.y + self.height
+
+        self.scale = safe_scale
+        self.width = max(1, int(round(self.base_width * safe_scale)))
+        self.height = max(1, int(round(self.base_height * safe_scale)))
+        self.shoe_width = max(1, int(round(self.base_shoe_width * safe_scale)))
+        self.shoe_height = max(1, int(round(self.base_shoe_height * safe_scale)))
+
+        # Keep feet anchored so the player does not sink into the ground when growing
+        self.y = prev_bottom - self.height
+
+        if self.source_images:
+            self._refresh_images()
+
     # Input-related ---------------------------------
     def start_jump(self):
         if self.jump_count < self.max_jumps:
-            self.vy = self.jump_strength
+            # Use jump_strength from config
+            self.vy = self.config['physics']['jump_strength']
             self.is_jumping = True
             self.jump_held = True
             self.jump_time = 0
@@ -108,15 +151,16 @@ class Player:
 
     # Bounce when stomping an enemy ------------------
     def stomp_enemy(self, jump_key_pressed: bool):
+        jump_strength = self.config['physics']['jump_strength']
         if jump_key_pressed:
             # Jump key pressed -> big bounce
-            self.vy = self.jump_strength * 1.3
+            self.vy = jump_strength * 1.3
             self.is_jumping = True
             self.jump_held = True
             self.jump_time = 0
         else:
             # No jump key -> small bounce
-            self.vy = self.jump_strength * 0.4
+            self.vy = jump_strength * 0.4
             self.is_jumping = True
             self.jump_held = False
             self.jump_time = 0

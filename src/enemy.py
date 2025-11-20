@@ -4,7 +4,7 @@ import pygame
 class Enemy:
     _next_id = 0
 
-    def __init__(self, world_x, y, move_range=100, speed=2, width=40, height=40, use_gravity=True):
+    def __init__(self, world_x, y, move_range=100, speed=2, width=40, height=40, scale=1.0, use_gravity=True):
         """
         world_x: 世界座標でのx
         y      : 画面上でのy（地面にいる感じ）
@@ -21,6 +21,9 @@ class Enemy:
         self.speed = speed
         self.width = width
         self.height = height
+        self.base_width = width
+        self.base_height = height
+        self.scale = 1.0
         self.direction = 1  # 1:右へ, -1:左へ
         self.color = (255, 80, 80)
         self.use_gravity = use_gravity
@@ -30,20 +33,48 @@ class Enemy:
         
         # Load images
         self.images = []
+        self.source_images = []
+        self.use_image = False
         try:
             for i in range(1, 5):
                 img = pygame.image.load(f'assets/enemy/{i}.png').convert_alpha()
-                img = pygame.transform.scale(img, (int(self.width * 1.2), int(self.height * 1.2)))
-                self.images.append(img)
+                self.source_images.append(img)
             self.use_image = True
         except Exception as e:
             print(f"Failed to load enemy images: {e}")
             self.use_image = False
 
+        # Set initial scale
+        self.set_scale(scale)
+
         # Animation state
         self.animation_timer = 0
         self.current_frame_index = 0
         self.ANIMATION_SPEED = 6  # 24 frames / 4 images = 6 frames per image
+
+    def _refresh_images(self):
+        if not self.source_images:
+            return
+
+        scaled_width = max(1, int(self.width * 1.2))
+        scaled_height = max(1, int(self.height * 1.2))
+        self.images = [
+            pygame.transform.scale(img, (scaled_width, scaled_height))
+            for img in self.source_images
+        ]
+
+    def set_scale(self, scale):
+        safe_scale = max(0.25, min(float(scale), 4.0))
+        prev_bottom = self.y
+
+        self.scale = safe_scale
+        self.width = max(4, int(round(self.base_width * safe_scale)))
+        self.height = max(4, int(round(self.base_height * safe_scale)))
+        if self.source_images:
+            self._refresh_images()
+
+        # Keep feet anchored
+        self.y = prev_bottom
 
     def move_patrol(self):
         """左右に往復運動"""

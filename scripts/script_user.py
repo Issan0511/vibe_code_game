@@ -1,155 +1,130 @@
-# 来場者がいじるスクリプト（デフォルト版）
+# 来場者が編集するスクリプト（デフォルト版）
+# このファイルを編集してゲームをカスタマイズしてください！
 
-memory = {}
+memory = {}  # ゲームの状態を記憶する辞書（待機時間、タイマーなど）
 
 def on_init(state, api):
-    # ---- 初期化: 利用可能な足場インデックスを検出 ----
-    # プラットフォームが存在するインデックスを探して memory に保存する
-    # 最大チェック数は16（通常この範囲に収まる想定）
-    available = []
-    for i in range(16):
-        pos = api.get_platform_pos(i)
-        if pos is not None:
-            available.append(i)
+    """
+    ゲーム開始時（ゲーム起動時・リセット時）に1回だけ実行されます。
+    ここで設定を変更してからゲームを起動してください。
+    """
+    # ---------- ゲームの物理演算 ----------
+    # api.update_config を使ってゲームの設定を変更します。
+    api.update_config({
+        
+        # ---------- プレイヤー設定 ----------
+        "player": {
+            "x": 200,          # プレイヤーの初期位置（画面左端からの距離）
+            "scale": 1,
+        },
+        
+        # ---------- 物理演算 ----------
+        "physics": {
+            "gravity": 0.8,           # 重力（高いほど落下が速くなる）
+            "jump_strength": -10,     # ジャンプ力（負の値で上方向に作用）
+            "acceleration": 0.333,    # 加速度（高いほど素早く加速）
+            "deceleration": 0.2,      # 減速度（高いほど素早く減速）
+            "max_speed": 5.33,        # 最大速度
+            "bg_scroll_speed": 5      # 背景スクロール速度
+        },
+        
+        # ---------- 地面設定 ----------
+        "ground": {
+            "y_offset": 80,           # 画面下部から地面までの距離
+        },
+        
+        # ---------- ゴール（クリア条件） ----------
+        "goal": {
+            "world_x": 3000,  # ゴールの世界座標 X
+            "world_y": 0,     # ゴールの世界座標 Y（相対）
+            "width": 60,      # ゴールの幅
+            "height": 80,     # ゴールの高さ
+        },
+        
+        # ---------- 敵設定 ----------
+        "enemies": [
+            # 敵 1: 高い位置にいる敵
+            {
+            "world_x": 385,        # 敵の世界座標 X
+            "move_range": 80,      # 敵が左右に動く幅
+            "speed": 2,            # 敵の移動速度
+            "width": 40,           # 敵の幅
+            "height": 40,          # 敵の高さ
+            "scale": 1,            # 表示スケール
+            "use_gravity": False,  # 重力を使うか（False = 空中に浮く）
+            "y_offset": 127        # 地面からの高さ
+            },
+            # 敵 2: 中間の高さにいる敵
+            {
+            "world_x": 1065,
+            "move_range": 60,
+            "speed": 1.5,
+            "width": 40,
+            "height": 40,
+            "scale": 1,
+            "use_gravity": False
+            # y_offset がない場合は 0（地面上）
+            },
+            # 敵 3: 低い位置にいる敵
+            {
+            "world_x": 1941,
+            "move_range": 100,
+            "speed": 2,
+            "width": 40,
+            "height": 40,
+            "scale": 1,
+            "use_gravity": False,
+            "y_offset": 112
+            }
+        ],
+        
+        # ---------- 足場（ジャンプ用の足場） ----------
+        "platforms": [
+            # 足場 1: 最初の足場
+            {"world_x": 300, "y_offset": 100, "width": 150},
+            # 足場 2
+            {"world_x": 698, "y_offset": 110, "width": 160},
+            # 足場 3
+            {"world_x": 1300, "y_offset": 120, "width": 150},
+            # 足場 4
+            {"world_x": 2098, "y_offset": 84, "width": 120},
+            # 足場 5
+            {"world_x": 2289, "y_offset": 148, "width": 120},
+            # 足場 6
+            {"world_x": 2484, "y_offset": 87, "width": 140},
+            # 足場 7: ゴール付近の足場
+            {"world_x": 2720, "y_offset": 40, "width": 160}
+        ],
+        
+        # ---------- 崖（地面がないエリア） ----------
 
-    memory['platform_indices'] = available
+        # 崖の間は地面がないので落ちるとゲームオーバー
+        "cliffs": [
+            # 崖 1
+            {"start_x": 590, "end_x": 905},
+            # 崖 2
+            {"start_x": 1237, "end_x": 1653},
+            # 崖 3: 最後の大きな崖
+            {"start_x": 2041, "end_x": 2919}
+        ]
 
-    # ---- 初期化: 各足場の移動方向を決める ----
-    # 上下移動にするために vy を交互に -1 / +1 にして位相差を作る
-    speeds = []
-    for idx in range(len(available)):
-        if idx % 2 == 0:
-            speeds.append((0, -1))  # 上向きに移動開始
-        else:
-            speeds.append((0, 1))   # 下向きに移動開始
-    memory['platform_speeds'] = speeds
-
-    # ---- 初期化: プレイヤーが足場上にいる状態とバウンスタイマー管理 ----
-    # on_platform: プラットフォームごとにプレイヤーが上にいるかを保持
-    # bounce_end_time: バウンスが終わる時刻（ms）を保持
-    on_platform = {}
-    bounce_end_time = {}
-    cur_time = state['world']['time_ms']
-    for idx in available:
-        on_platform[idx] = False
-        bounce_end_time[idx] = 0
-    memory['on_platform'] = on_platform
-    memory['bounce_end_time'] = bounce_end_time
-
-
+    })
+  
 def on_tick(state, api):
-    # ---- 足場検出が未完了なら再検出 ----
-    # 実行時に動的に足場が追加される場合に備えて、見つかっていなければ再検索する
-    if 'platform_indices' not in memory or not memory['platform_indices']:
-        available = []
-        for i in range(32):
-            pos = api.get_platform_pos(i)
-            if pos is not None:
-                available.append(i)
-        memory['platform_indices'] = available
-        speeds = []
-        for idx in range(len(available)):
-            if idx % 2 == 0:
-                speeds.append((0, -1))
-            else:
-                speeds.append((0, 1))
-        memory['platform_speeds'] = speeds
+    # # プレイヤー位置と現在時刻を取得
+    # px = state["player"]["x"]
+    # py = state["player"]["y"]
+    # now = state["world"]["time_ms"]
 
-        # 初期化されていない状態を整える
-        on_platform = {}
-        bounce_end_time = {}
-        cur_time = state['world']['time_ms']
-        for idx in available:
-            on_platform[idx] = False
-            bounce_end_time[idx] = 0
-        memory['on_platform'] = on_platform
-        memory['bounce_end_time'] = bounce_end_time
+    # # ---------- ゴールに仕掛けるトラップの処理 (明示的な引数) ----------
+    # api.goal_move_on_approach(state, memory, approach_distance=50, move_dy=-200, spawn_enemy_at_goal=True)
+    # # ---------- プレイヤーに追従する敵の処理 (明示的な引数) ----------
+    # api.enemy_chase_and_jump(state, memory, chase_distance=150, jump_chance=0.01, jump_cooldown_ms=500)
+    # # ---------- 一定間隔で敵が出現する処理 (明示的にデフォルトを指定) ----------
+    # api.spawn_enemy_periodically(state, memory, interval_ms=1000, spawn_chance=0.5, offset_x=400)
+    # # ---------- 足場が動く処理 (明示的にデフォルトを指定) ----------
+    # api.platform_oscillate(memory, platform_indices=[0, 1], speeds=[(0, -1), (0, 1)], move_range=80)
 
-    # ---- 足場の上にジャンプ（着地）したら足場を跳ねさせる処理 ----
-    # プレイヤーが『足場の上にいる』状態を判定して、着地（未着地->着地）時に跳ねる
-    # 判定のしきい値: 横方向 64px、縦方向 16px
-    player = state.get('player', {})
-    px = player.get('x', 0.0)
-    py = player.get('y', 0.0)
-    cur_time = state['world']['time_ms']
-
-    horiz_threshold = 64    # px: 横方向の判定幅（ピクセル）
-    vert_threshold = 16     # px: 縦方向の判定幅（ピクセル）
-    bounce_duration_ms = 400  # ms: バウンス持続時間
-    bounce_vy = -8.0  # 上向き速度（負の値が上）
-
-    # 準備: メモリ参照
-    platform_indices = memory.get('platform_indices', [])
-    platform_speeds = memory.get('platform_speeds', [])
-    on_platform = memory.get('on_platform', {})
-    bounce_end_time = memory.get('bounce_end_time', {})
-
-    # 判定とバウンストリガー
-    for idx in platform_indices:
-        pos = api.get_platform_pos(idx)
-        if pos is None:
-            # プラットフォームが消えた場合はフラグをリセット
-            on_platform[idx] = False
-            bounce_end_time[idx] = 0
-            continue
-
-        dx = px - pos['x']
-        dy = py - pos['y']
-        # 横方向と縦方向の距離の絶対値で「上にいるか」を判定
-        near_horiz = (dx >= -horiz_threshold and dx <= horiz_threshold)
-        near_vert = (dy >= -vert_threshold and dy <= vert_threshold)
-        is_on_top = near_horiz and near_vert
-
-        previously_on = on_platform.get(idx, False)
-
-        # 着地を検出（前回は上にいなかったが今回上にいる）
-        if not previously_on and is_on_top:
-            # 着地が発生したらバウンスを開始
-            end_time = cur_time + bounce_duration_ms
-            bounce_end_time[idx] = end_time
-            on_platform[idx] = True
-            # プラットフォームを上方向に跳ねさせる
-            api.set_platform_velocity(idx, vx=0, vy=bounce_vy)
-        else:
-            # 状態更新: 上にいるフラグは現在の判定に合わせる（着地直後は True のまま）
-            on_platform[idx] = is_on_top
-
-        # バウンス期間が終了したらフラグをクリアして停止させる
-        if bounce_end_time.get(idx, 0) and cur_time >= bounce_end_time.get(idx, 0):
-            # バウンス終了
-            bounce_end_time[idx] = 0
-            # 移動を止める（次の処理で往復運動に含めるため）
-            api.stop_platform(idx)
-            # フラグは現在の接触判定に合わせる（着地から離れていれば False）
-            on_platform[idx] = is_on_top
-
-    # メモリに戻す
-    memory['on_platform'] = on_platform
-    memory['bounce_end_time'] = bounce_end_time
-
-    # ---- 全ての非バウンス足場を上下に往復運動させる ----
-    # バウンス中の足場はここに含めず、動きを優先させない
-    non_bouncing_indices = []
-    non_bouncing_speeds = []
-    for pos_i, idx in enumerate(platform_indices):
-        # バウンス中かどうか確認
-        if bounce_end_time.get(idx, 0) and cur_time < bounce_end_time.get(idx, 0):
-            # バウンス中なので往復運動に含めない
-            continue
-        non_bouncing_indices.append(idx)
-        # platform_speeds 配列は platform_indices と対応している前提
-        if pos_i < len(platform_speeds):
-            non_bouncing_speeds.append(platform_speeds[pos_i])
-        else:
-            non_bouncing_speeds.append((0, -1))
-
-    # move_range=80 は往復幅（ピクセル）
-    if non_bouncing_indices:
-        api.platform_oscillate(memory,
-                               platform_indices=non_bouncing_indices,
-                               speeds=non_bouncing_speeds,
-                               move_range=80)
-
-    # ---- 既存のデフォルト処理（そのまま残す） ----
-    # 既存サンプルではここに他の処理が入りますが、今回は足場の移動とバウンスのみ変更しました
     pass
+
+    
