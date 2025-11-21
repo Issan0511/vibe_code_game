@@ -89,16 +89,26 @@ if original_speed is not None:
 
 ### 敵の制御
 
-#### `api.spawn_enemy(x, y)`
+#### `api.spawn_enemy(x, y, use_gravity=True, speed=2, scale=1.0)`
 
 指定した座標に敵を出現させます（最大300体）。
+
+**引数:**
+- `x`: 出現するx座標（ワールド座標）
+- `y`: 出現するy座標（ワールド座標）
+- `use_gravity`: 重力の影響を受けるかどうか（デフォルト: True）
+- `speed`: 敵の移動速度（デフォルト: 2）
+- `scale`: 敵のサイズ倍率（デフォルト: 1.0）
 
 **使用例:**
 
 ```python
 px = state["player"]["x"]
 py = state["player"]["y"]
-api.spawn_enemy(x=px + 400, y=py)
+api.spawn_enemy(x=px + 400, y=py)  # デフォルト設定で出現
+
+# カスタマイズ例
+api.spawn_enemy(x=px + 400, y=py, use_gravity=False, speed=3, scale=1.5)
 ```
 
 #### `api.set_enemy_vel(enemy_id, vx, vy=None)`
