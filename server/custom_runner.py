@@ -262,6 +262,147 @@ class RemoteAPI:
                 return platforms[platform_index]
         return None
 
+    # ---- オーバーレイ描画API ----
+    def draw_circle(self, x, y, radius, color, width=0):
+        """画面上に円を描画（オーバーレイ）"""
+        self.commands.append({
+            "op": "draw_circle",
+            "x": int(x),
+            "y": int(y),
+            "radius": int(radius),
+            "color": list(color),
+            "width": int(width),
+        })
+
+    def draw_rect(self, x, y, width, height, color, line_width=0):
+        """画面上に矩形を描画（オーバーレイ）"""
+        self.commands.append({
+            "op": "draw_rect",
+            "x": int(x),
+            "y": int(y),
+            "width": int(width),
+            "height": int(height),
+            "color": list(color),
+            "line_width": int(line_width),
+        })
+
+    def draw_line(self, start_x, start_y, end_x, end_y, color, width=1):
+        """画面上に線を描画（オーバーレイ）"""
+        self.commands.append({
+            "op": "draw_line",
+            "start_x": int(start_x),
+            "start_y": int(start_y),
+            "end_x": int(end_x),
+            "end_y": int(end_y),
+            "color": list(color),
+            "width": int(width),
+        })
+
+    def clear_overlay(self):
+        """オーバーレイをクリア"""
+        self.commands.append({
+            "op": "clear_overlay",
+        })
+
+    # ---- 敵との衝突判定設定 ----
+    def set_enemy_collision(self, stomp_kills_enemy=None, touch_kills_player=None, bounce_on_stomp=None):
+        """
+        敵との衝突判定を設定
+        
+        引数:
+            stomp_kills_enemy: 踏むと敵を倒すか(True/False)
+            touch_kills_player: 触れるとプレイヤーが死ぬか(True/False)
+            bounce_on_stomp: 踏んだ時にバウンスするか(True/False)
+        """
+        if stomp_kills_enemy is not None:
+            self.commands.append({
+                "op": "set_enemy_collision",
+                "key": "stomp_kills_enemy",
+                "value": bool(stomp_kills_enemy)
+            })
+        if touch_kills_player is not None:
+            self.commands.append({
+                "op": "set_enemy_collision",
+                "key": "touch_kills_player",
+                "value": bool(touch_kills_player)
+            })
+        if bounce_on_stomp is not None:
+            self.commands.append({
+                "op": "set_enemy_collision",
+                "key": "bounce_on_stomp",
+                "value": bool(bounce_on_stomp)
+            })
+
+    def spawn_symmetric(self, enemy_id, offset_x=60, speed=None, scale=None, use_gravity=None):
+        """指定した敵の左右に対称な位置に敵を2体生成するヘルパー
+
+        enemy_id: オリジナル敵の id
+        offset_x: 元の敵の x から左右に離す距離（世界座標）
+        speed: 生成時に上書きする速度（省略可）
+        scale: 生成時に上書きするスケール（省略可）
+        use_gravity: 生成時に上書きする重力フラグ（省略可）
+        """
+        # Runner 側では現在の state が保持されているので、ここで元の敵情報を参照する
+        if not hasattr(self, '_current_state'):
+            return
+        enemies = self._current_state.get('enemies', [])
+        base = None
+        for e in enemies:
+            if e.get('id') == enemy_id:
+                base = e
+                break
+        if base is None:
+            return
+
+        # Debug print to runner's stdout so game host can see
+        print(f"spawn_symmetric called for id={enemy_id}, base={base}")
+
+        bx = base.get('x', 0)
+        by = base.get('y', 0)
+        bwidth = base.get('width') or 40
+        bheight = base.get('height') or 40
+        bmove_range = base.get('move_range') or 100
+        bscale = base.get('scale') if base.get('scale') is not None else 1.0
+        busg = base.get('use_gravity') if base.get('use_gravity') is not None else True
+        bspeed = base.get('speed') if base.get('speed') is not None else 2.0
+
+        # 左右の world_x を決定
+        left_x = bx - offset_x
+        right_x = bx + offset_x
+
+        # 可能なら上書き
+        spawn_speed = float(speed) if speed is not None else float(bspeed)
+        spawn_scale = float(scale) if scale is not None else float(bscale)
+        spawn_use_gravity = bool(use_gravity) if use_gravity is not None else bool(busg)
+
+        # 2体生成コマンドを追加
+        # ログも送っておく（ゲーム内のテキスト表示）
+        self.commands.append({"op":"runner_log", "msg": f"spawn_symmetric: base_id={enemy_id}, left={left_x}, right={right_x}, speed={spawn_speed}, scale={spawn_scale}"})
+        # include size/move_range so main can reproduce similar enemies
+        self.commands.append({
+            "op": "spawn_enemy",
+            "x": left_x,
+            "y": by,
+            "use_gravity": spawn_use_gravity,
+            "speed": spawn_speed,
+            "scale": spawn_scale,
+            "move_range": bmove_range,
+            "width": bwidth,
+            "height": bheight,
+        })
+        # pass explicit extras as additional keys in command dict (spawn_enemy accepts extra fields)
+        self.commands.append({
+            "op": "spawn_enemy",
+            "x": right_x,
+            "y": by,
+            "use_gravity": spawn_use_gravity,
+            "speed": spawn_speed,
+            "scale": spawn_scale,
+            "move_range": bmove_range,
+            "width": bwidth,
+            "height": bheight,
+        })
+
     # ---- 高レベルAPI ----
     def spawn_enemy_periodically(self, state, memory, interval_ms=1000, spawn_chance=0.5, offset_x=400):
         """

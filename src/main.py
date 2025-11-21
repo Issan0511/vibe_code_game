@@ -69,6 +69,21 @@ player = Player(PLAYER_X, GROUND_Y, config)
 game_over = False
 game_clear = False
 
+# オーバーレイ描画リスト
+overlay_drawings = []
+
+
+# 敵との衝突判定設定（APIで変更可能）
+enemy_collision_config = {
+    "stomp_kills_enemy": True,  # 踏むと敵を倒すか
+    "touch_kills_player": True,  # 触れるとプレイヤーが死ぬか
+    "bounce_on_stomp": True,     # 踏んだ時にバウンスするか
+}
+
+# このフレームで踏んだ・触れた敵のIDリスト
+stomped_enemies_this_frame = []
+touched_enemies_this_frame = []
+
 # テキスト表示用
 display_text = None
 display_text_timer = 0
@@ -132,7 +147,17 @@ def make_state():
             "gravity": config['physics']['gravity'],
         },
         "enemies": [
-            {"id": e.id, "x": e.world_x, "y": e.y, "use_gravity": e.use_gravity}
+            {
+                "id": e.id,
+                "x": e.world_x,
+                "y": e.y,
+                "use_gravity": e.use_gravity,
+                "speed": getattr(e, 'speed', None),
+                "move_range": getattr(e, 'move_range', None),
+                "width": getattr(e, 'width', None),
+                "height": getattr(e, 'height', None),
+                "scale": getattr(e, 'scale', None),
+            }
             for e in enemies
         ],
         "goal": {"x": goal.world_x, "y": goal.y},
@@ -140,6 +165,10 @@ def make_state():
             {"x": p.world_x, "y": p.y}
             for p in platforms
         ],
+        "collision": {
+            "stomped_enemies": stomped_enemies_this_frame,  # このフレームで踏んだ敵のIDリスト
+            "touched_enemies": touched_enemies_this_frame,  # このフレームで触れた敵のIDリスト
+        },
     }
 
 # =========================
@@ -322,9 +351,13 @@ def apply_command(cmd):
         speed = float(cmd.get("speed", 2.0))
         use_gravity = bool(cmd.get("use_gravity", True))
         scale = float(cmd.get("scale", 1.0))
+        move_range = int(cmd.get("move_range", 100))
+        width = int(cmd.get("width", 40))
+        height = int(cmd.get("height", 40))
+        print(f"[DEBUG] spawn_enemy cmd: x={x}, y={y}, speed={speed}, scale={scale}, use_gravity={use_gravity}, move_range={move_range}, width={width}, height={height}")
         enemies.append(
-            Enemy(world_x=x, y=y, move_range=100, speed=speed,
-                  width=40, height=40, scale=scale, use_gravity=use_gravity)
+            Enemy(world_x=x, y=y, move_range=move_range, speed=speed,
+                  width=width, height=height, scale=scale, use_gravity=use_gravity)
         )
 
     elif op == "spawn_snake":
@@ -518,6 +551,64 @@ def apply_command(cmd):
         if trace:
             print(trace)
 
+    elif op == "draw_circle":
+        x = cmd.get("x", 0)
+        y = cmd.get("y", 0)
+        radius = cmd.get("radius", 10)
+        color = tuple(cmd.get("color", [255, 255, 255]))
+        width = cmd.get("width", 0)
+        overlay_drawings.append({
+            "type": "circle",
+            "x": x,
+            "y": y,
+            "radius": radius,
+            "color": color,
+            "width": width,
+        })
+
+    elif op == "draw_rect":
+        x = cmd.get("x", 0)
+        y = cmd.get("y", 0)
+        width = cmd.get("width", 10)
+        height = cmd.get("height", 10)
+        color = tuple(cmd.get("color", [255, 255, 255]))
+        line_width = cmd.get("line_width", 0)
+        overlay_drawings.append({
+            "type": "rect",
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "color": color,
+            "line_width": line_width,
+        })
+
+    elif op == "draw_line":
+        start_x = cmd.get("start_x", 0)
+        start_y = cmd.get("start_y", 0)
+        end_x = cmd.get("end_x", 0)
+        end_y = cmd.get("end_y", 0)
+        color = tuple(cmd.get("color", [255, 255, 255]))
+        width = cmd.get("width", 1)
+        overlay_drawings.append({
+            "type": "line",
+            "start_x": start_x,
+            "start_y": start_y,
+            "end_x": end_x,
+            "end_y": end_y,
+            "color": color,
+            "width": width,
+        })
+
+    elif op == "clear_overlay":
+        overlay_drawings.clear()
+
+    elif op == "set_enemy_collision":
+        key = cmd.get("key")
+        value = cmd.get("value")
+        if key in enemy_collision_config:
+            enemy_collision_config[key] = bool(value)
+
 # =========================
 # ゲームリセット関数
 # =========================
@@ -568,6 +659,14 @@ def reset_game():
     ai_status_text = None
     ai_status_timer = 0
     prompt_flag_shown = False
+    
+    # オーバーレイをクリア
+    overlay_drawings.clear()
+    
+    # 敵との衝突判定設定をリセット
+    enemy_collision_config["stomp_kills_enemy"] = True
+    enemy_collision_config["touch_kills_player"] = True
+    enemy_collision_config["bounce_on_stomp"] = True
     
     # custom_runner を再起動（script_user.py の再読み込みと init 実行）
     custom_conn.restart()
@@ -756,15 +855,11 @@ while running:
         # =========================
         # 更新処理
         # =========================
-        # ---- script_user（TCP越し）を呼ぶ ----
-        state_dict = make_state()
-        custom_conn.send_state(state_dict)
-        for cmd in custom_conn.poll_commands():
-            apply_command(cmd)
-
         current_gravity = config['physics']['gravity']
         for enemy in enemies:
             enemy.update(platforms, GROUND_Y, current_gravity, lambda x: is_on_ground(x, cliffs))
+        
+        # (state send will happen after collision detection so script_user gets up-to-date info)
 
         # 画面外に落ちた敵を削除
         enemies[:] = [e for e in enemies if e.y < SCREEN_HEIGHT + 100]
@@ -772,6 +867,10 @@ while running:
         # =========================
         # 当たり判定
         # =========================
+        # このフレームの衝突情報をリセット
+        stomped_enemies_this_frame.clear()
+        touched_enemies_this_frame.clear()
+        
         shoe_rect = player.get_shoe_rect()
         
         # 敵との衝突判定
@@ -781,18 +880,30 @@ while running:
             enemy_rect = enemy.get_rect(camera_x)
             # 靴との当たり判定（敵が死ぬ）
             if shoe_rect.colliderect(enemy_rect) and player.vy > 0:
-                enemies_to_remove.append(enemy)
+                stomped_enemies_this_frame.append(enemy.id)  # 踏んだ敵を記録
+                if enemy_collision_config["stomp_kills_enemy"]:
+                    enemies_to_remove.append(enemy)
                 enemy_bounced = True  # 敵を踏んだ
             # プレイヤー本体との当たり判定（ゲームオーバー）
             elif player_rect.colliderect(enemy_rect):
-                game_over = True
+                touched_enemies_this_frame.append(enemy.id)  # 触れた敵を記録
+                if enemy_collision_config["touch_kills_player"]:
+                    game_over = True
         
-        # 敵を削除
+        # ---- script_user（TCP越し）を呼ぶ ----
+        # 衝突判定が済んだら、まだ敵を削除する前に state を送る
+        # こうすることで script_user 側は踏んだ敵のプロパティも参照できる
+        state_dict = make_state()
+        custom_conn.send_state(state_dict)
+        for cmd in custom_conn.poll_commands():
+            apply_command(cmd)
+
+        # 敵を削除（runner にコマンドが反映された後に削除）
         for enemy in enemies_to_remove:
             enemies.remove(enemy)
-        
+
         # 敵を踏んだ場合のジャンプ処理
-        if enemy_bounced:
+        if enemy_bounced and enemy_collision_config["bounce_on_stomp"]:
             keys = pygame.key.get_pressed()
             player.stomp_enemy(keys[pygame.K_SPACE])
 
@@ -934,6 +1045,16 @@ while running:
         status_x = SCREEN_WIDTH - status_w - 10
         status_y = 35  # display_textの下に表示
         screen.blit(status_surf, (status_x, status_y))
+
+    # オーバーレイ描画
+    for drawing in overlay_drawings:
+        if drawing["type"] == "circle":
+            pygame.draw.circle(screen, drawing["color"], (drawing["x"], drawing["y"]), drawing["radius"], drawing["width"])
+        elif drawing["type"] == "rect":
+            rect = pygame.Rect(drawing["x"], drawing["y"], drawing["width"], drawing["height"])
+            pygame.draw.rect(screen, drawing["color"], rect, drawing["line_width"])
+        elif drawing["type"] == "line":
+            pygame.draw.line(screen, drawing["color"], (drawing["start_x"], drawing["start_y"]), (drawing["end_x"], drawing["end_y"]), drawing["width"])
 
     pygame.display.flip()
 
