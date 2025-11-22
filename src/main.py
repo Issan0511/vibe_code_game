@@ -36,6 +36,7 @@ GROUND_Y = SCREEN_HEIGHT - config['ground']['y_offset']
 # 初期化
 # =========================
 pygame.init()
+pygame.mixer.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Side-scrolling Game (Parallax Background)")
 clock = pygame.time.Clock()
@@ -59,6 +60,25 @@ except:
     bg_width = SCREEN_WIDTH
     bg_height = SCREEN_HEIGHT
 
+# タイトル画像の読み込み
+try:
+    title_image = pygame.image.load('assets/title.png').convert_alpha()
+except:
+    title_image = None
+
+# 効果音の読み込み
+try:
+    jump_sound = pygame.mixer.Sound('assets/jump.mp3')
+    player_dead_sound = pygame.mixer.Sound('assets/player_dead.mp3')
+    enemy_dead_sound = pygame.mixer.Sound('assets/enemy_dead.mp3')
+    clear_sound = pygame.mixer.Sound('assets/clear.mp3')
+except Exception as e:
+    print(f"Failed to load sound effects: {e}")
+    jump_sound = None
+    player_dead_sound = None
+    enemy_dead_sound = None
+    clear_sound = None
+
 # =========================
 # プレイヤー
 # =========================
@@ -68,6 +88,7 @@ player = Player(PLAYER_X, GROUND_Y, config)
 # ゲーム状態
 game_over = False
 game_clear = False
+game_started = False  # タイトル画面の状態を追加
 
 # オーバーレイ描画リスト
 overlay_drawings = []
@@ -119,7 +140,10 @@ enemies = [
           move_range=e['move_range'], speed=e['speed'],
           width=e['width'], height=e['height'],
           scale=e.get('scale', 1.0),
-          use_gravity=e.get('use_gravity', True))
+          use_gravity=e.get('use_gravity', True),
+          stomp_kills_enemy=e.get('stomp_kills_enemy', True),
+          touch_kills_player=e.get('touch_kills_player', True),
+          bounce_on_stomp=e.get('bounce_on_stomp', True))
     for e in config['enemies']
 ]
 
@@ -294,7 +318,10 @@ def apply_command(cmd):
                       move_range=e['move_range'], speed=e['speed'],
                       width=e['width'], height=e['height'],
                       scale=e.get('scale', 1.0),
-                      use_gravity=e.get('use_gravity', True))
+                      use_gravity=e.get('use_gravity', True),
+                      stomp_kills_enemy=e.get('stomp_kills_enemy', True),
+                      touch_kills_player=e.get('touch_kills_player', True),
+                      bounce_on_stomp=e.get('bounce_on_stomp', True))
                 for e in val
             ])
         elif key == "platforms":
@@ -344,7 +371,7 @@ def apply_command(cmd):
                 BG_WIDTH = val
 
     elif op == "spawn_enemy":
-        if len(enemies) >= 300:
+        if len(enemies) >= 30:
             return
         x = float(cmd.get("x", camera_x + 800))
         y = float(cmd.get("y", GROUND_Y))
@@ -354,14 +381,19 @@ def apply_command(cmd):
         move_range = int(cmd.get("move_range", 100))
         width = int(cmd.get("width", 40))
         height = int(cmd.get("height", 40))
+        stomp_kills_enemy = bool(cmd.get("stomp_kills_enemy", True))
+        touch_kills_player = bool(cmd.get("touch_kills_player", True))
+        bounce_on_stomp = bool(cmd.get("bounce_on_stomp", True))
         print(f"[DEBUG] spawn_enemy cmd: x={x}, y={y}, speed={speed}, scale={scale}, use_gravity={use_gravity}, move_range={move_range}, width={width}, height={height}")
         enemies.append(
             Enemy(world_x=x, y=y, move_range=move_range, speed=speed,
-                  width=width, height=height, scale=scale, use_gravity=use_gravity)
+                  width=width, height=height, scale=scale, use_gravity=use_gravity,
+                  stomp_kills_enemy=stomp_kills_enemy, touch_kills_player=touch_kills_player,
+                  bounce_on_stomp=bounce_on_stomp)
         )
 
     elif op == "spawn_snake":
-        if len(enemies) >= 300:
+        if len(enemies) >= 30:
             return
         x = float(cmd.get("x", camera_x + 800))
         y = float(cmd.get("y", 300))
@@ -370,8 +402,13 @@ def apply_command(cmd):
         speed = float(cmd.get("speed", 3))
         move_range = int(cmd.get("move_range", 150))
         scale = float(cmd.get("scale", 1.0))
+        stomp_kills_enemy = bool(cmd.get("stomp_kills_enemy", True))
+        touch_kills_player = bool(cmd.get("touch_kills_player", True))
+        bounce_on_stomp = bool(cmd.get("bounce_on_stomp", True))
         snake = Enemy(world_x=x, y=y, move_range=move_range, speed=speed,
-                     width=width, height=height, scale=scale, use_gravity=False)
+                     width=width, height=height, scale=scale, use_gravity=False,
+                     stomp_kills_enemy=stomp_kills_enemy, touch_kills_player=touch_kills_player,
+                     bounce_on_stomp=bounce_on_stomp)
         snake.color = (0, 200, 0)  # 緑色で蛇らしく
         enemies.append(snake)
 
@@ -603,6 +640,48 @@ def apply_command(cmd):
     elif op == "clear_overlay":
         overlay_drawings.clear()
 
+    elif op == "draw_enemy_overlay":
+        enemy_id = cmd.get("enemy_id")
+        shape = cmd.get("shape", "rect")
+        color = tuple(cmd.get("color", [255, 0, 0]))
+        size = cmd.get("size", 50)
+        line_width = cmd.get("line_width", 0)
+        
+        # 対象の敵を取得
+        target_enemies = []
+        if enemy_id == "all":
+            target_enemies = enemies
+        else:
+            for e in enemies:
+                if e.id == enemy_id:
+                    target_enemies.append(e)
+                    break
+        
+        # 各敵にオーバーレイを描画
+        for e in target_enemies:
+            ex = int(e.world_x - camera_x)
+            ey = int(e.y - e.height // 2)
+            
+            if shape == "circle":
+                overlay_drawings.append({
+                    "type": "circle",
+                    "x": ex,
+                    "y": ey,
+                    "radius": size,
+                    "color": color,
+                    "width": line_width,
+                })
+            else:  # rect
+                overlay_drawings.append({
+                    "type": "rect",
+                    "x": ex - size // 2,
+                    "y": ey - size // 2,
+                    "width": size,
+                    "height": size,
+                    "color": color,
+                    "line_width": line_width,
+                })
+
     elif op == "set_enemy_collision":
         key = cmd.get("key")
         value = cmd.get("value")
@@ -642,7 +721,10 @@ def reset_game():
               move_range=e['move_range'], speed=e['speed'],
               width=e['width'], height=e['height'],
               scale=e.get('scale', 1.0),
-              use_gravity=e.get('use_gravity', True))
+              use_gravity=e.get('use_gravity', True),
+              stomp_kills_enemy=e.get('stomp_kills_enemy', True),
+              touch_kills_player=e.get('touch_kills_player', True),
+              bounce_on_stomp=e.get('bounce_on_stomp', True))
         for e in config['enemies']
     ])
     
@@ -704,17 +786,27 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-        # スペースキーでジャンプ開始
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
-                player.start_jump()
-            # R キーでリセット
-            if event.key == pygame.K_r:
-                reset_game()
-        # スペースキーを離したらジャンプ持続終了
-        if event.type == pygame.KEYUP:
-            if event.key == pygame.K_SPACE:
-                player.release_jump()
+        # タイトル画面中はスペースキーでゲーム開始
+        if not game_started:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    game_started = True
+        else:
+            # スペースキーでジャンプ開始
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    # ジャンプ可能な場合のみSEを再生
+                    if player.jump_count < player.max_jumps:
+                        if jump_sound:
+                            jump_sound.play()
+                    player.start_jump()
+                # R キーでリセット
+                if event.key == pygame.K_r:
+                    reset_game()
+            # スペースキーを離したらジャンプ持続終了
+            if event.type == pygame.KEYUP:
+                if event.key == pygame.K_SPACE:
+                    player.release_jump()
 
     # =========================
     # AIステータスチェック（0.5秒に1回）
@@ -754,7 +846,7 @@ while running:
     # =========================
     # 入力処理
     # =========================
-    if not game_over and not game_clear:
+    if not game_over and not game_clear and game_started:
         keys = pygame.key.get_pressed()
         
         # 慣性を使った横移動（configから毎フレーム取得）
@@ -798,6 +890,8 @@ while running:
                 follow_vx = clamp(dx * CAMERA_FOLLOW_GAIN, -CAMERA_FOLLOW_MAX, CAMERA_FOLLOW_MAX)
                 camera_x += follow_vx
 
+    # タイトル画面中またはゲーム終了後は更新処理をスキップ
+    if game_started and not game_over and not game_clear:
         # =========================
         # 足場の更新
         # =========================
@@ -876,18 +970,24 @@ while running:
         # 敵との衝突判定
         enemies_to_remove = []
         enemy_bounced = False  # 敵を踏んだかどうか
+        last_stomped_enemy = None  # 最後に踏んだ敵（バウンス設定用）
         for enemy in enemies:
             enemy_rect = enemy.get_rect(camera_x)
             # 靴との当たり判定（敵が死ぬ）
             if shoe_rect.colliderect(enemy_rect) and player.vy > 0:
                 stomped_enemies_this_frame.append(enemy.id)  # 踏んだ敵を記録
-                if enemy_collision_config["stomp_kills_enemy"]:
+                if enemy.stomp_kills_enemy:
+                    if enemy_dead_sound:
+                        enemy_dead_sound.play()
                     enemies_to_remove.append(enemy)
                 enemy_bounced = True  # 敵を踏んだ
+                last_stomped_enemy = enemy
             # プレイヤー本体との当たり判定（ゲームオーバー）
             elif player_rect.colliderect(enemy_rect):
                 touched_enemies_this_frame.append(enemy.id)  # 触れた敵を記録
-                if enemy_collision_config["touch_kills_player"]:
+                if enemy.touch_kills_player:
+                    if player_dead_sound:
+                        player_dead_sound.play()
                     game_over = True
         
         # ---- script_user（TCP越し）を呼ぶ ----
@@ -903,25 +1003,31 @@ while running:
             enemies.remove(enemy)
 
         # 敵を踏んだ場合のジャンプ処理
-        if enemy_bounced and enemy_collision_config["bounce_on_stomp"]:
+        if enemy_bounced and last_stomped_enemy and last_stomped_enemy.bounce_on_stomp:
             keys = pygame.key.get_pressed()
             player.stomp_enemy(keys[pygame.K_SPACE])
 
         # ゴール判定
         goal_rect = goal.get_rect(camera_x)
         if player_rect.colliderect(goal_rect):
+            if clear_sound:
+                clear_sound.play()
             game_clear = True
 
         # 崖判定（プレイヤーが地面の範囲外で、足場にも乗っていない場合）
         player_world_x = camera_x + player.x_screen
         if player.y >= GROUND_Y and not is_on_ground(player_world_x, cliffs) and player_on_platform is None:
+            if player_dead_sound:
+                player_dead_sound.play()
             game_over = True
 
         # 上方向へ画面外に出たら死亡にする（例: 重力が0のときの無限上昇対策）
         # プレイヤーの下端が画面上端よりさらに一定量上に行ったらゲームオーバー
         if player.y + player.height < -100:
+            if player_dead_sound:
+                player_dead_sound.play()
             game_over = True
-    else:
+    elif game_started:
         # ゲーム終了後、Rキーでリスタート
         keys = pygame.key.get_pressed()
         if keys[pygame.K_r]:
@@ -930,6 +1036,37 @@ while running:
     # =========================
     # 描画
     # =========================
+    
+    # タイトル画面の描画
+    if not game_started:
+
+        # 白背景で描画
+        screen.fill((255, 255, 255))
+        # タイトル画像をアスペクト比を保ってリサイズして描画
+        if title_image:
+            # 画面に対する最大サイズ（マージンを残す）
+            max_w = int(SCREEN_WIDTH * 1.35)
+            max_h = int(SCREEN_HEIGHT * 0.9)
+            iw, ih = title_image.get_size()
+            # scale <= 1.0 にして拡大しすぎないようにする（必要なら1.0を超える許可可）
+            scale = min(max_w / iw, max_h / ih)
+            new_w = max(1, int(iw * scale))
+            new_h = max(1, int(ih * scale))
+            try:
+                scaled_title = pygame.transform.smoothscale(title_image, (new_w, new_h))
+            except Exception:
+                scaled_title = pygame.transform.scale(title_image, (new_w, new_h))
+
+            # 画像を中央やや上に配置し、スタート文は画像の下に表示
+            title_rect = scaled_title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20))
+            screen.blit(scaled_title, title_rect)
+
+
+
+
+        pygame.display.flip()
+        continue  # ゲーム画面の描画をスキップ
+    
     # 背景画像のスクロール描画
     if bg_image:
         # カメラ位置に応じた背景のオフセットを計算（視差効果のため、少し遅めにスクロール）

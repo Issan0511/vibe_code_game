@@ -13,6 +13,12 @@ def on_init(state, api):
     api.update_config({
         
         # ---------- プレイヤー設定 ----------
+        """
+        前提条件
+        デフォルトのプレイヤーの幅は 40 ピクセル、高さは 60 ピクセル、座標の基準点は中心（x軸）と足元（y軸）である。
+        デフォルトの小ジャンプの高さが100ピクセル、大ジャンプの高さが150ピクセルである。
+
+"""
         "player": {
             "x": 200,          # プレイヤーの初期位置（画面左端からの距離）
             "scale": 1,
@@ -42,6 +48,11 @@ def on_init(state, api):
         },
         
         # ---------- 敵設定 ----------
+        """
+        前提条件
+        デフォルトの敵の幅は 40 ピクセル、高さは 40 ピクセル、座標の基準点は中心（x軸）と足元（y軸）である。
+
+"""       
         "enemies": [
             # 敵 1: 高い位置にいる敵
             {
@@ -52,7 +63,10 @@ def on_init(state, api):
             "height": 40,          # 敵の高さ
             "scale": 1,            # 表示スケール
             "use_gravity": True,  # 重力を使うか（False = 空中に浮く）
-            "y_offset": 127        # 地面からの高さ
+            "y_offset": 127,       # 地面からの高さ
+            "stomp_kills_enemy": True,    # 踏むと敵を倒すか
+            "touch_kills_player": True,   # 触れるとプレイヤーが死ぬか
+            "bounce_on_stomp": True       # 踏んだ時にバウンスするか
             },
             # 敵 2: 中間の高さにいる敵
             {
@@ -62,8 +76,11 @@ def on_init(state, api):
             "width": 40,
             "height": 40,
             "scale": 1,
-            "use_gravity": False
+            "use_gravity": False,
             # y_offset がない場合は 0（地面上）
+            "stomp_kills_enemy": True,
+            "touch_kills_player": True,
+            "bounce_on_stomp": True
             },
             # 敵 3: 低い位置にいる敵
             {
@@ -74,7 +91,10 @@ def on_init(state, api):
             "height": 40,
             "scale": 1,
             "use_gravity": False,
-            "y_offset": 112
+            "y_offset": 112,
+            "stomp_kills_enemy": True,
+            "touch_kills_player": True,
+            "bounce_on_stomp": True
             }
         ],
         
@@ -125,63 +145,6 @@ def on_tick(state, api):
     # # ---------- 足場が動く処理 (明示的にデフォルトを指定) ----------
     # api.platform_oscillate(memory, platform_indices=[0, 1], speeds=[(0, -1), (0, 1)], move_range=80)
 
-    # # ---------- オーバーレイ描画の例 ----------
-    # # 毎フレームクリアしてから描画
-    # api.clear_overlay()
-    
-    # # 画面サイズを取得
-    # screen_width = api.get_config("screen.width") or 800
-    # screen_height = api.get_config("screen.height") or 600
-    # # 画面中央に赤い円を描画
-    # api.draw_circle(screen_width // 2, screen_height // 2, 50, (255, 0, 0))
-    # # 画面左上に青い矩形を描画
-    # api.draw_rect(10, 10, 100, 50, (0, 0, 255))
-    # # 対角線を描画
-    # api.draw_line(0, 0, screen_width, screen_height, (0, 255, 0), 2)
-
-    # ---------- 敵との衝突判定設定の例 ----------
-    # 敵を踏んでも倒せない設定にする
-    # api.set_enemy_collision(stomp_kills_enemy=False)
-    # 敵に触れても死なない設定にする
-    # api.set_enemy_collision(touch_kills_player=False)
-    # 敵を踏んでもバウンスしない設定にする
-    # api.set_enemy_collision(bounce_on_stomp=False)
-    # 複数の設定を同時に変更
-    # api.set_enemy_collision(stomp_kills_enemy=False, touch_kills_player=False, bounce_on_stomp=False)
-
-    # ---------- 敵との衝突判定を取得する例 ----------
-    # このフレームで踏んだ敵のIDリストを取得
-    stomped = state.get("collision", {}).get("stomped_enemies", [])
-    if stomped:
-        api.show_text(f"Stomped {len(stomped)} enemies!", 1.0, (255, 255, 0))
-        # 踏んだ敵ごとに、左右対称の同サイズの敵を生成する
-        for eid in stomped:
-            # runner 側のヘルパーを使って左右に敵を生成
-            api.spawn_symmetric(eid, offset_x=80)
-    
-    # このフレームで触れた敵のIDリストを取得
-    touched = state.get("collision", {}).get("touched_enemies", [])
-    if touched:
-        api.show_text(f"Touched {len(touched)} enemies!", 1.0, (255, 100, 100))
-
-    # スクリプト側に保持するメモリを使う
-    if "last_collision_msg_time" not in memory:
-        memory["last_collision_msg_time"] = 0
-
-    now = state["world"]["time_ms"]
-    COOLDOWN_MS = 500  # 0.5秒に1回まで表示
-
-    if now - memory["last_collision_msg_time"] > COOLDOWN_MS:
-        stomped = state.get("collision", {}).get("stomped_enemies", [])
-        touched = state.get("collision", {}).get("touched_enemies", [])
-        if stomped:
-            api.show_text(f"Stomped {len(stomped)}!", duration=0.8, color=(255,255,0))
-            for eid in stomped:
-                api.spawn_symmetric(eid, offset_x=80)
-            memory["last_collision_msg_time"] = now
-        elif touched:
-            api.show_text(f"Touched {len(touched)}!", duration=0.8, color=(255,100,100))
-            memory["last_collision_msg_time"] = now
-
     pass
 
+    
